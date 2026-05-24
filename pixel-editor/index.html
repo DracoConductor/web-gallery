@@ -156,7 +156,8 @@ kbd {
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
 
-const CELL = 24;
+const MAX_DISPLAY = 640;
+let cell = 24;
 let gridW = 16, gridH = 16;
 let pixels = [];
 let currentColor = '#e94560';
@@ -177,10 +178,15 @@ const PRESETS = [
 ];
 
 // ---- Init ----
+function calcCell(w, h) {
+  return Math.max(2, Math.min(32, Math.floor(MAX_DISPLAY / Math.max(w, h))));
+}
+
 function initGrid(w, h) {
   gridW = w; gridH = h;
-  canvas.width = w * CELL;
-  canvas.height = h * CELL;
+  cell = calcCell(w, h);
+  canvas.width = w * cell;
+  canvas.height = h * cell;
   pixels = Array.from({length: h}, () => Array(w).fill('#ffffff'));
   undoStack = []; redoStack = [];
   drawAll();
@@ -189,17 +195,17 @@ function initGrid(w, h) {
 
 function drawPixel(x, y, color) {
   ctx.fillStyle = color;
-  ctx.fillRect(x * CELL, y * CELL, CELL, CELL);
+  ctx.fillRect(x * cell, y * cell, cell, cell);
 }
 
 function drawGrid() {
   ctx.strokeStyle = 'rgba(0,0,0,0.08)';
   ctx.lineWidth = 0.5;
   for (let x = 1; x < gridW; x++) {
-    ctx.beginPath(); ctx.moveTo(x * CELL, 0); ctx.lineTo(x * CELL, canvas.height); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x * cell, 0); ctx.lineTo(x * cell, canvas.height); ctx.stroke();
   }
   for (let y = 1; y < gridH; y++) {
-    ctx.beginPath(); ctx.moveTo(0, y * CELL); ctx.lineTo(canvas.width, y * CELL); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, y * cell); ctx.lineTo(canvas.width, y * cell); ctx.stroke();
   }
 }
 
@@ -215,7 +221,7 @@ function updateStatus() {
     `画布 ${gridW}×${gridH} · ${tool==='pen'?'画笔':tool==='eraser'?'橡皮擦':tool==='fill'?'油漆桶':'吸管'}`;
 }
 function updateZoom() {
-  document.getElementById('zoomInfo').textContent = `${gridW * CELL}×${gridH * CELL} · ${CELL}px/cell`;
+  document.getElementById('zoomInfo').textContent = `${gridW * cell}×${gridH * cell} · ${cell}px/cell`;
 }
 
 // ---- Tools ----
@@ -283,7 +289,7 @@ function getGridPos(e) {
   const scaleY = canvas.height / rect.height;
   const mx = (e.clientX - rect.left) * scaleX;
   const my = (e.clientY - rect.top) * scaleY;
-  return [Math.floor(mx / CELL), Math.floor(my / CELL)];
+  return [Math.floor(mx / cell), Math.floor(my / cell)];
 }
 
 canvas.addEventListener('mousedown', e => {
