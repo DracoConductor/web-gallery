@@ -439,7 +439,7 @@ let restitution = 0.6;
 
 function gravityVector() {
   const rad = gravDir * Math.PI / 180;
-  return v2(Math.cos(rad) * gravity, Math.sin(rad) * gravity);
+  return v2(Math.cos(rad) * gravity, -Math.sin(rad) * gravity); // negate y: math→screen
 }
 
 function simulate(dt) {
