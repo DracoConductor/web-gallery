@@ -84,6 +84,15 @@ button.active { background: #e94560; border-color: #e94560; }
       <span style="color:#4ecdc4">青色球</span> 漫反射 ·
       <span style="color:#ffd700">金色球</span> 半镜面
     </div>
+    <div style="margin-top:8px;font-size:12px;color:#889">
+      光源位置 (拖滑条实时更新)<br>
+      X: <input type="range" id="lx" min="-3" max="3" step="0.1" value="2.0" style="width:100px;vertical-align:middle">
+      <span id="lxVal" style="color:#ffd700">2.0</span><br>
+      Y: <input type="range" id="ly" min="-1" max="4" step="0.1" value="2.5" style="width:100px;vertical-align:middle">
+      <span id="lyVal" style="color:#ffd700">2.5</span><br>
+      Z: <input type="range" id="lz" min="-2" max="3" step="0.1" value="0.5" style="width:100px;vertical-align:middle">
+      <span id="lzVal" style="color:#ffd700">0.5</span>
+    </div>
 
     <h3>1. 光线方程</h3>
     <div class="formula"><span class="hl">P</span> = <span class="hl">O</span> + t · <span class="hl">D</span></div>
@@ -139,7 +148,8 @@ const SPHERES = [
   { c: [-0.6, -0.5, 2.2], r: 0.45, color: [0.3, 0.8, 0.75], name: '青色球', refl: 0.05 },
   { c: [ 0.3,  0.0, 2.8], r: 0.35, color: [1.0, 0.84, 0.0], name: '金色球', refl: 0.4 },
 ];
-const LIGHT = { pos: [2.0, 2.5, 0.5], color: [1.0, 1.0, 0.95] };
+let lightPos = [2.0, 2.5, 0.5];
+const LIGHT_COLOR = [1.0, 1.0, 0.95];
 const AMBIENT = [0.05, 0.05, 0.08];
 const FLOOR_Y = -1.0;
 const FLOOR_COLOR = [0.3, 0.35, 0.4];
@@ -217,7 +227,7 @@ function debugTrace(rayO, rayD, depth) {
   debugLog.push('  '.repeat(depth) + `  法线 N=(${hit.normal[0].toFixed(3)}, ${hit.normal[1].toFixed(3)}, ${hit.normal[2].toFixed(3)})`);
 
   // Shadow ray
-  const toLight = vec(LIGHT.pos, hit.point);
+  const toLight = vec(lightPos, hit.point);
   const lightDist = len(toLight);
   const lightDir = norm(toLight);
   const shadowHit = traceScene(add(hit.point, mul(lightDir, 0.001)), lightDir);
@@ -226,7 +236,7 @@ function debugTrace(rayO, rayD, depth) {
 
   // Lambert diffuse
   const NdotL = Math.max(0, dot(hit.normal, lightDir));
-  const diffuse = inShadow ? [0,0,0] : mul(LIGHT.color, NdotL);
+  const diffuse = inShadow ? [0,0,0] : mul(LIGHT_COLOR, NdotL);
   debugLog.push('  '.repeat(depth) + `  N·L = ${NdotL.toFixed(3)}, 漫反射贡献=(${diffuse[0].toFixed(2)}, ${diffuse[1].toFixed(2)}, ${diffuse[2].toFixed(2)})`);
 
   // Ambient
@@ -258,14 +268,14 @@ function trace(rayO, rayD, depth) {
   const hit = traceScene(rayO, rayD);
   if (!hit) return [0, 0, 0];
 
-  const toLight = vec(LIGHT.pos, hit.point);
+  const toLight = vec(lightPos, hit.point);
   const lightDist = len(toLight);
   const lightDir = norm(toLight);
   const shadowHit = traceScene(add(hit.point, mul(lightDir, 0.001)), lightDir);
   const inShadow = shadowHit && shadowHit.t < lightDist;
 
   const NdotL = Math.max(0, dot(hit.normal, lightDir));
-  const diffuse = inShadow ? [0,0,0] : mul(LIGHT.color, NdotL);
+  const diffuse = inShadow ? [0,0,0] : mul(LIGHT_COLOR, NdotL);
 
   let color = [
     hit.obj.color[0] * (diffuse[0] + AMBIENT[0]),
@@ -377,6 +387,27 @@ document.getElementById('btn400').onclick = () => {
   render();
 };
 document.getElementById('btnReRender').onclick = render;
+
+// ---- Light sliders ----
+let renderTimer = null;
+document.getElementById('lx').oninput = function() {
+  lightPos[0] = parseFloat(this.value);
+  document.getElementById('lxVal').textContent = lightPos[0].toFixed(1);
+  clearTimeout(renderTimer);
+  renderTimer = setTimeout(render, 150);
+};
+document.getElementById('ly').oninput = function() {
+  lightPos[1] = parseFloat(this.value);
+  document.getElementById('lyVal').textContent = lightPos[1].toFixed(1);
+  clearTimeout(renderTimer);
+  renderTimer = setTimeout(render, 150);
+};
+document.getElementById('lz').oninput = function() {
+  lightPos[2] = parseFloat(this.value);
+  document.getElementById('lzVal').textContent = lightPos[2].toFixed(1);
+  clearTimeout(renderTimer);
+  renderTimer = setTimeout(render, 150);
+};
 
 // ---- Start ----
 render();
