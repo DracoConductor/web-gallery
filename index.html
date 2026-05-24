@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Web Gallery</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #0a0a0f;
+  color: #ccc;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  display: flex; justify-content: center; align-items: center;
+  min-height: 100vh;
+}
+.gallery {
+  display: flex; gap: 24px; flex-wrap: wrap; justify-content: center;
+  max-width: 700px; padding: 20px;
+}
+.card {
+  background: #12121a;
+  border-radius: 12px;
+  padding: 28px 24px;
+  width: 260px;
+  text-align: center;
+  text-decoration: none;
+  color: #ccc;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.5);
+  transition: transform 0.2s, box-shadow 0.2s;
+  border: 1px solid #2a2a3a;
+}
+.card:hover { transform: translateY(-4px); box-shadow: 0 8px 32px rgba(0,0,0,0.6); }
+.card h2 { font-size: 18px; color: #4ecdc4; margin-bottom: 8px; }
+.card p { font-size: 13px; color: #666; line-height: 1.5; }
+.card .icon { font-size: 40px; margin-bottom: 12px; display: block; }
+</style>
+</head>
+<body>
+<div class="gallery">
+  <a class="card" href="pixel-editor/">
+    <span class="icon">🎨</span>
+    <h2>像素编辑器</h2>
+    <p>16×16 像素画绘制工具，支持画笔/橡皮擦/油漆桶/吸管，可导出 PNG</p>
+  </a>
+  <a class="card" href="life-game/">
+    <span class="icon">🧬</span>
+    <h2>生命游戏</h2>
+    <p>Conway's Game of Life，60×40 网格，观察生命从简单规则中涌现</p>
+  </a>
+</div>
+</body>
+</html>

@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>生命游戏</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #0a0a0f;
+  color: #ccc;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  display: flex; justify-content: center; align-items: center;
+  min-height: 100vh; user-select: none;
+}
+.app {
+  text-align: center;
+  background: #12121a;
+  padding: 24px; border-radius: 12px;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.5);
+}
+h1 {
+  font-size: 20px; color: #4ecdc4; margin-bottom: 12px; letter-spacing: 3px;
+}
+canvas {
+  background: #111;
+  border-radius: 4px;
+  cursor: crosshair;
+  box-shadow: inset 0 0 20px rgba(0,0,0,0.5);
+}
+.controls {
+  display: flex; gap: 8px; justify-content: center; margin-top: 14px; flex-wrap: wrap;
+}
+button {
+  padding: 8px 18px; border: 1px solid #2a2a3a; border-radius: 6px;
+  background: #1a1a2e; color: #ccc; cursor: pointer; font-size: 13px;
+  transition: all 0.15s;
+}
+button:hover { background: #2a2a4a; }
+button.active { background: #e94560; border-color: #e94560; }
+.info {
+  margin-top: 10px; font-size: 12px; color: #555;
+  display: flex; gap: 20px; justify-content: center;
+}
+.info span { color: #4ecdc4; }
+a { color: #4ecdc4; text-decoration: none; font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <h1>Conway's Game of Life</h1>
+  <canvas id="canvas"></canvas>
+  <div class="controls">
+    <button class="active" id="btnRun">▶ 运行</button>
+    <button id="btnStep">⏭ 单步</button>
+    <button id="btnRandom">🎲 随机</button>
+    <button id="btnClear">🗑 清空</button>
+    <button id="btnFaster">⏩ 加速</button>
+  </div>
+  <div class="info">
+    世代: <span id="gen">0</span>
+    存活: <span id="pop">0</span>
+    速度: <span id="spd">100ms</span>
+  </div>
+  <p style="margin-top:8px;font-size:11px;color:#444">
+    点击网格放置/移除细胞 · 观察生命从简单规则中涌现
+  </p>
+</div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+const COLS = 60, ROWS = 40, CELL = 12;
+canvas.width = COLS * CELL;
+canvas.height = ROWS * CELL;
+
+let grid = Array.from({length: ROWS}, () => Array(COLS).fill(0));
+let running = false;
+let gen = 0;
+let speed = 100; // ms per tick
+let timer = null;
+
+function drawGrid() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  for (let y = 0; y < ROWS; y++)
+    for (let x = 0; x < COLS; x++) {
+      if (grid[y][x]) {
+        ctx.fillStyle = '#4ecdc4';
+        ctx.fillRect(x * CELL + 1, y * CELL + 1, CELL - 2, CELL - 2);
+      }
+    }
+
+  // Faint grid lines
+  ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+  ctx.lineWidth = 0.5;
+  for (let x = 0; x <= COLS; x++) { ctx.beginPath(); ctx.moveTo(x * CELL, 0); ctx.lineTo(x * CELL, canvas.height); ctx.stroke(); }
+  for (let y = 0; y <= ROWS; y++) { ctx.beginPath(); ctx.moveTo(0, y * CELL); ctx.lineTo(canvas.width, y * CELL); ctx.stroke(); }
+}
+
+function countNeighbors(g, row, col) {
+  let n = 0;
+  for (let dy = -1; dy <= 1; dy++)
+    for (let dx = -1; dx <= 1; dx++) {
+      if (dy === 0 && dx === 0) continue;
+      const y = (row + dy + ROWS) % ROWS;
+      const x = (col + dx + COLS) % COLS;
+      n += g[y][x];
+    }
+  return n;
+}
+
+function tick() {
+  const next = grid.map(r => [...r]);
+  for (let y = 0; y < ROWS; y++)
+    for (let x = 0; x < COLS; x++) {
+      const n = countNeighbors(grid, y, x);
+      if (grid[y][x] === 1) {
+        next[y][x] = (n === 2 || n === 3) ? 1 : 0;
+      } else {
+        next[y][x] = (n === 3) ? 1 : 0;
+      }
+    }
+  grid = next;
+  gen++;
+  updateStats();
+  drawGrid();
+}
+
+function updateStats() {
+  document.getElementById('gen').textContent = gen;
+  document.getElementById('pop').textContent = grid.flat().reduce((a, b) => a + b, 0);
+}
+
+function start() {
+  if (running) return;
+  running = true;
+  document.getElementById('btnRun').textContent = '⏸ 暂停';
+  document.getElementById('btnRun').classList.add('active');
+  timer = setInterval(tick, speed);
+}
+
+function pause() {
+  running = false;
+  document.getElementById('btnRun').textContent = '▶ 运行';
+  document.getElementById('btnRun').classList.remove('active');
+  clearInterval(timer);
+}
+
+function randomize(density = 0.3) {
+  pause();
+  gen = 0;
+  for (let y = 0; y < ROWS; y++)
+    for (let x = 0; x < COLS; x++)
+      grid[y][x] = Math.random() < density ? 1 : 0;
+  updateStats();
+  drawGrid();
+}
+
+function clearAll() {
+  pause();
+  gen = 0;
+  grid = Array.from({length: ROWS}, () => Array(COLS).fill(0));
+  updateStats();
+  drawGrid();
+}
+
+// ---- Canvas interaction ----
+canvas.addEventListener('click', e => {
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  const mx = (e.clientX - rect.left) * scaleX;
+  const my = (e.clientY - rect.top) * scaleY;
+  const x = Math.floor(mx / CELL);
+  const y = Math.floor(my / CELL);
+  if (x >= 0 && x < COLS && y >= 0 && y < ROWS) {
+    grid[y][x] = 1 - grid[y][x];
+    updateStats();
+    drawGrid();
+  }
+});
+
+canvas.addEventListener('mousemove', e => {
+  if (e.buttons !== 1) return; // drag to paint
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  const mx = (e.clientX - rect.left) * scaleX;
+  const my = (e.clientY - rect.top) * scaleY;
+  const x = Math.floor(mx / CELL);
+  const y = Math.floor(my / CELL);
+  if (x >= 0 && x < COLS && y >= 0 && y < ROWS && grid[y][x] === 0) {
+    grid[y][x] = 1;
+    updateStats();
+    drawGrid();
+  }
+});
+
+// ---- Buttons ----
+document.getElementById('btnRun').onclick = () => running ? pause() : start();
+document.getElementById('btnStep').onclick = () => { pause(); tick(); };
+document.getElementById('btnRandom').onclick = () => randomize();
+document.getElementById('btnClear').onclick = () => clearAll();
+document.getElementById('btnFaster').onclick = () => {
+  speed = speed <= 30 ? 200 : speed <= 60 ? 100 : speed <= 120 ? 60 : 30;
+  document.getElementById('spd').textContent = speed + 'ms';
+  if (running) { pause(); start(); }
+};
+
+// ---- Start ----
+randomize(0.25);
+</script>
+</body>
+</html>
