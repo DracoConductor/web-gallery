@@ -143,7 +143,7 @@ canvas { display: block; cursor: crosshair; }
 
 <!-- Bottom controls -->
 <div style="position:fixed;bottom:12px;left:50%;transform:translateX(-50%);display:flex;gap:10px;align-items:center;background:#12121a;padding:8px 16px;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.5)">
-  <button id="btnPlay" class="playing" style="padding:6px 16px;background:#e94560;border:1px solid #e94560;border-radius:5px;color:#fff;cursor:pointer;font-size:12px">⏸ 暂停</button>
+  <button id="btnPlay" style="padding:6px 16px;border:1px solid #2a2a3a;border-radius:5px;background:#1a1a2e;color:#ccc;cursor:pointer;font-size:12px">▶ 运行</button>
   <button id="btnStep" style="padding:6px 12px;border:1px solid #2a2a3a;border-radius:5px;background:#1a1a2e;color:#ccc;cursor:pointer;font-size:12px">⏭ 单步</button>
   <button id="btnReset" style="padding:6px 12px;border:1px solid #2a2a3a;border-radius:5px;background:#1a1a2e;color:#ccc;cursor:pointer;font-size:12px">🔄 重置</button>
   <span style="font-size:10px;color:#555">空格=播放/暂停 →=单步</span>
@@ -501,7 +501,7 @@ function simulate(dt) {
         if (b.pos.y + b.radius > groundY) {
           const depth = b.pos.y + b.radius - groundY;
           b.pos.y -= depth;
-          b.vel.y = Math.min(b.vel.y, 0) * -restitution * 0.5;
+          if (b.vel.y > 0) b.vel.y = -b.vel.y * restitution;
           b.vel.x *= (1 - 0.3 * subDt * 60); // ground friction
         }
       } else if (b.shape === 'rect' || b.shape === 'poly') {
@@ -511,7 +511,7 @@ function simulate(dt) {
         if (lowestY > groundY) {
           const depth = lowestY - groundY;
           b.pos.y -= depth;
-          b.vel.y = Math.min(b.vel.y, 0) * -restitution * 0.5;
+          if (b.vel.y > 0) b.vel.y = -b.vel.y * restitution;
           b.vel.x *= (1 - 0.3 * subDt * 60);
         }
       }
@@ -733,7 +733,7 @@ let selectedBody = null;
 let currentTool = 'ball';
 let frictionTarget = null;
 let frictionStep = 0; // 0=idle, 1=selected first
-let playing = true;
+let playing = false;
 let dragging = false;
 let dragBody = null;
 let dragOffset = v2(0,0);
@@ -1098,15 +1098,6 @@ document.getElementById('btnReset').onclick = () => {
   frictionTarget = null; frictionStep = 0;
   springTarget = null; ropeTarget = null;
   updateProps();
-  // Add some demo bodies
-  const b1 = createBox(250, 400, 40, 40, 3);
-  bodies.push(b1);
-  const b2 = createBall(500, 200, 15, 1);
-  b2.vel = v2(-80, -60);
-  bodies.push(b2);
-  const ground = createBox(400, 465, 700, 30, 10000);
-  ground.fixed = true;
-  bodies.push(ground);
 };
 
 // ============ KEYBOARD ============
@@ -1122,7 +1113,7 @@ document.addEventListener('keydown', e => {
 });
 
 // ============ INIT & LOOP ============
-document.getElementById('btnReset').click();
+document.getElementById('btnPlay').textContent = '▶ 运行';
 
 let lastTime = performance.now();
 function loop(now) {
