@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>像素编辑器</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #1a1a2e;
+  color: #eee;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  user-select: none;
+}
+.app {
+  display: flex;
+  gap: 20px;
+  background: #16213e;
+  padding: 24px;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+}
+.toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 180px;
+}
+.toolbar h2 {
+  font-size: 18px;
+  color: #e94560;
+  text-align: center;
+  letter-spacing: 2px;
+}
+.toolbar label {
+  font-size: 12px;
+  color: #8899aa;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.toolbar input[type="color"] {
+  width: 48px; height: 48px;
+  border: 2px solid #333;
+  border-radius: 8px;
+  cursor: pointer;
+  background: none;
+}
+.presets {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+}
+.presets button {
+  width: 32px; height: 32px;
+  border: 2px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: transform 0.1s;
+}
+.presets button:hover { transform: scale(1.15); border-color: #fff; }
+.presets button.active { border-color: #fff; box-shadow: 0 0 8px rgba(255,255,255,0.4); }
+.tool-btn {
+  padding: 10px 16px;
+  border: 1px solid #2a2a4a;
+  border-radius: 6px;
+  background: #0f3460;
+  color: #eee;
+  cursor: pointer;
+  font-size: 13px;
+  transition: background 0.15s;
+}
+.tool-btn:hover { background: #1a508b; }
+.tool-btn.active { background: #e94560; border-color: #e94560; }
+.tool-btn.export { background: #1a6b3c; border-color: #23954a; }
+.tool-btn.export:hover { background: #23954a; }
+.tool-btn.danger { background: #5c1a1a; border-color: #8b2020; }
+.tool-btn.danger:hover { background: #7a2020; }
+.size-row {
+  display: flex; gap: 8px; align-items: center;
+}
+.size-row input {
+  width: 56px; padding: 6px 8px;
+  background: #0f3460; border: 1px solid #2a2a4a;
+  border-radius: 4px; color: #eee; font-size: 13px; text-align: center;
+}
+.canvas-wrap {
+  position: relative;
+}
+.canvas-wrap canvas {
+  background: #fff;
+  image-rendering: pixelated;
+  border-radius: 4px;
+  cursor: crosshair;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+}
+.zoom-info {
+  position: absolute; bottom: 8px; right: 12px;
+  font-size: 11px; color: #666; pointer-events: none;
+  background: rgba(0,0,0,0.6); padding: 2px 8px; border-radius: 4px;
+}
+.status {
+  font-size: 11px; color: #667; text-align: center;
+  min-height: 16px;
+}
+kbd {
+  background: #0f3460; padding: 1px 6px; border-radius: 3px;
+  font-size: 11px; border: 1px solid #2a2a4a;
+}
+</style>
+</head>
+<body>
+
+<div class="app">
+  <div class="toolbar">
+    <h2>像素编辑器</h2>
+
+    <label>画笔颜色</label>
+    <input type="color" id="colorPicker" value="#e94560">
+
+    <label>预设调色板</label>
+    <div class="presets" id="presets"></div>
+
+    <label>工具</label>
+    <button class="tool-btn active" id="btnPen">画笔</button>
+    <button class="tool-btn" id="btnEraser">橡皮擦</button>
+    <button class="tool-btn" id="btnFill">油漆桶</button>
+    <button class="tool-btn" id="btnEyedropper">吸管</button>
+
+    <label>画布尺寸</label>
+    <div class="size-row">
+      <input type="number" id="gridW" value="16" min="4" max="64">
+      <span style="color:#667">×</span>
+      <input type="number" id="gridH" value="16" min="4" max="64">
+      <button class="tool-btn" id="btnResize" style="padding:6px 12px">应用</button>
+    </div>
+
+    <button class="tool-btn export" id="btnExport">导出 PNG</button>
+    <button class="tool-btn danger" id="btnClear">清空画布</button>
+
+    <div class="status" id="status">左键绘制 · 画布 16×16</div>
+  </div>
+
+  <div class="canvas-wrap">
+    <canvas id="canvas"></canvas>
+    <div class="zoom-info" id="zoomInfo"></div>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+const CELL = 24;
+let gridW = 16, gridH = 16;
+let pixels = [];
+let currentColor = '#e94560';
+let tool = 'pen';
+let drawing = false;
+let lastX = -1, lastY = -1;
+let undoStack = [], redoStack = [];
+const MAX_UNDO = 64;
+
+const PRESETS = [
+  '#000000','#ffffff','#888888','#cccccc',
+  '#e94560','#e06090','#ff6b6b','#ffa07a',
+  '#ffd700','#ffa500','#f0a050','#c0a060',
+  '#4ecdc4','#2ecc71','#27ae60','#1a8a4a',
+  '#3498db','#5b6ee1','#6c5ce7','#a855f7',
+  '#8b4513','#654321','#cd853f','#f5deb3',
+  '#555555','#333333','#1a1a2e','#0f3460',
+];
+
+// ---- Init ----
+function initGrid(w, h) {
+  gridW = w; gridH = h;
+  canvas.width = w * CELL;
+  canvas.height = h * CELL;
+  pixels = Array.from({length: h}, () => Array(w).fill('#ffffff'));
+  undoStack = []; redoStack = [];
+  drawAll();
+  updateZoom();
+}
+
+function drawPixel(x, y, color) {
+  ctx.fillStyle = color;
+  ctx.fillRect(x * CELL, y * CELL, CELL, CELL);
+}
+
+function drawGrid() {
+  ctx.strokeStyle = 'rgba(0,0,0,0.08)';
+  ctx.lineWidth = 0.5;
+  for (let x = 1; x < gridW; x++) {
+    ctx.beginPath(); ctx.moveTo(x * CELL, 0); ctx.lineTo(x * CELL, canvas.height); ctx.stroke();
+  }
+  for (let y = 1; y < gridH; y++) {
+    ctx.beginPath(); ctx.moveTo(0, y * CELL); ctx.lineTo(canvas.width, y * CELL); ctx.stroke();
+  }
+}
+
+function drawAll() {
+  for (let y = 0; y < gridH; y++)
+    for (let x = 0; x < gridW; x++)
+      drawPixel(x, y, pixels[y][x]);
+  drawGrid();
+}
+
+function updateStatus() {
+  document.getElementById('status').textContent =
+    `画布 ${gridW}×${gridH} · ${tool==='pen'?'画笔':tool==='eraser'?'橡皮擦':tool==='fill'?'油漆桶':'吸管'}`;
+}
+function updateZoom() {
+  document.getElementById('zoomInfo').textContent = `${gridW * CELL}×${gridH * CELL} · ${CELL}px/cell`;
+}
+
+// ---- Tools ----
+function setTool(t) {
+  tool = t;
+  document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('btn' + t.charAt(0).toUpperCase() + t.slice(1)).classList.add('active');
+  updateStatus();
+  canvas.style.cursor = t === 'eyedropper' ? 'crosshair' : t === 'eraser' ? 'cell' : 'crosshair';
+}
+
+function getColorAt(x, y) {
+  if (x < 0 || x >= gridW || y < 0 || y >= gridH) return null;
+  return pixels[y][x];
+}
+
+function paint(x, y, color) {
+  if (x < 0 || x >= gridW || y < 0 || y >= gridH) return;
+  if (pixels[y][x] === color) return;
+  pushUndo();
+  pixels[y][x] = color;
+  drawPixel(x, y, color);
+  drawGrid();
+}
+
+function floodFill(sx, sy, newColor) {
+  const target = pixels[sy][sx];
+  if (target === newColor) return;
+  pushUndo();
+  const stack = [[sx, sy]];
+  while (stack.length) {
+    const [x, y] = stack.pop();
+    if (x < 0 || x >= gridW || y < 0 || y >= gridH) continue;
+    if (pixels[y][x] !== target) continue;
+    pixels[y][x] = newColor;
+    stack.push([x+1,y],[x-1,y],[x,y+1],[x,y-1]);
+  }
+  drawAll();
+}
+
+function pushUndo() {
+  undoStack.push(pixels.map(r => [...r]));
+  if (undoStack.length > MAX_UNDO) undoStack.shift();
+  redoStack = [];
+}
+
+function undo() {
+  if (!undoStack.length) return;
+  redoStack.push(pixels.map(r => [...r]));
+  pixels = undoStack.pop();
+  drawAll();
+}
+
+function redo() {
+  if (!redoStack.length) return;
+  undoStack.push(pixels.map(r => [...r]));
+  pixels = redoStack.pop();
+  drawAll();
+}
+
+// ---- Canvas Events ----
+function getGridPos(e) {
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  const mx = (e.clientX - rect.left) * scaleX;
+  const my = (e.clientY - rect.top) * scaleY;
+  return [Math.floor(mx / CELL), Math.floor(my / CELL)];
+}
+
+canvas.addEventListener('mousedown', e => {
+  if (e.button === 1) return; // middle click
+  if (e.button === 2) { setTool('eraser'); } // right-click = eraser
+  drawing = true;
+  const [x, y] = getGridPos(e);
+  lastX = x; lastY = y;
+  if (tool === 'pen') paint(x, y, currentColor);
+  else if (tool === 'eraser') paint(x, y, '#ffffff');
+  else if (tool === 'fill') floodFill(x, y, currentColor);
+  else if (tool === 'eyedropper') {
+    const c = getColorAt(x, y);
+    if (c) { currentColor = c; document.getElementById('colorPicker').value = c; updatePresetActive(); }
+  }
+});
+
+canvas.addEventListener('mousemove', e => {
+  if (!drawing) return;
+  const [x, y] = getGridPos(e);
+  if (x === lastX && y === lastY) return;
+  lastX = x; lastY = y;
+  if (tool === 'pen') paint(x, y, currentColor);
+  else if (tool === 'eraser') paint(x, y, '#ffffff');
+});
+
+canvas.addEventListener('mouseup', () => { drawing = false; });
+canvas.addEventListener('mouseleave', () => { drawing = false; });
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+// ---- Keyboard ----
+document.addEventListener('keydown', e => {
+  if (e.ctrlKey && e.key === 'z') { e.preventDefault(); undo(); }
+  if (e.ctrlKey && e.key === 'y') { e.preventDefault(); redo(); }
+  if (e.key === 'b' && !e.ctrlKey) setTool('pen');
+  if (e.key === 'e' && !e.ctrlKey) setTool('eraser');
+  if (e.key === 'g' && !e.ctrlKey) setTool('fill');
+  if (e.key === 'i' && !e.ctrlKey) setTool('eyedropper');
+});
+
+// ---- UI Buttons ----
+document.getElementById('colorPicker').addEventListener('input', e => {
+  currentColor = e.target.value; updatePresetActive();
+});
+
+function buildPresets() {
+  const container = document.getElementById('presets');
+  PRESETS.forEach(c => {
+    const btn = document.createElement('button');
+    btn.style.background = c;
+    btn.title = c;
+    btn.onclick = () => { currentColor = c; document.getElementById('colorPicker').value = c; updatePresetActive(); };
+    container.appendChild(btn);
+  });
+}
+function updatePresetActive() {
+  document.querySelectorAll('.presets button').forEach(b => {
+    b.classList.toggle('active', b.style.background === currentColor || rgbToHex(b.style.background) === currentColor);
+  });
+}
+function rgbToHex(rgb) {
+  if (!rgb || !rgb.startsWith('rgb')) return '';
+  const [r,g,b] = rgb.match(/\d+/g).map(Number);
+  return '#' + [r,g,b].map(c => c.toString(16).padStart(2,'0')).join('');
+}
+
+document.getElementById('btnPen').onclick = () => setTool('pen');
+document.getElementById('btnEraser').onclick = () => setTool('eraser');
+document.getElementById('btnFill').onclick = () => setTool('fill');
+document.getElementById('btnEyedropper').onclick = () => setTool('eyedropper');
+
+document.getElementById('btnClear').onclick = () => {
+  if (confirm('清空画布？此操作可撤销 (Ctrl+Z)。')) {
+    pushUndo();
+    for (let y = 0; y < gridH; y++)
+      for (let x = 0; x < gridW; x++)
+        pixels[y][x] = '#ffffff';
+    drawAll();
+  }
+};
+
+document.getElementById('btnResize').onclick = () => {
+  const w = parseInt(document.getElementById('gridW').value) || 16;
+  const h = parseInt(document.getElementById('gridH').value) || 16;
+  const nw = Math.max(4, Math.min(64, w));
+  const nh = Math.max(4, Math.min(64, h));
+  document.getElementById('gridW').value = nw;
+  document.getElementById('gridH').value = nh;
+  if (nw === gridW && nh === gridH) return;
+  pushUndo();
+  const old = pixels;
+  pixels = Array.from({length: nh}, (_, y) =>
+    Array.from({length: nw}, (_, x) => (y < old.length && x < old[0].length) ? old[y][x] : '#ffffff')
+  );
+  initGrid(nw, nh);
+  drawAll();
+  updateStatus();
+};
+
+document.getElementById('btnExport').onclick = () => {
+  const scale = Math.max(1, Math.floor(512 / Math.max(gridW, gridH)));
+  const expCanvas = document.createElement('canvas');
+  expCanvas.width = gridW * scale;
+  expCanvas.height = gridH * scale;
+  const expCtx = expCanvas.getContext('2d');
+  expCtx.imageSmoothingEnabled = false;
+  for (let y = 0; y < gridH; y++)
+    for (let x = 0; x < gridW; x++) {
+      expCtx.fillStyle = pixels[y][x];
+      expCtx.fillRect(x * scale, y * scale, scale, scale);
+    }
+  expCanvas.toBlob(blob => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `pixel-art-${gridW}x${gridH}.png`;
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+};
+
+// ---- Start ----
+buildPresets();
+initGrid(16, 16);
+updateStatus();
+</script>
+</body>
+</html>
