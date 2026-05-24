@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>光线追踪学习器</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #0a0a0f;
+  color: #ccc;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+}
+.app {
+  display: flex; gap: 20px;
+  background: #12121a;
+  padding: 24px; border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  max-width: 1100px;
+}
+.left { text-align: center; }
+.left h2 { font-size: 16px; color: #4ecdc4; margin-bottom: 8px; letter-spacing: 2px; }
+canvas {
+  border-radius: 4px;
+  cursor: crosshair;
+  image-rendering: pixelated;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+}
+.render-info { font-size: 11px; color: #555; margin-top: 6px; }
+
+.right {
+  width: 420px; max-height: 520px; overflow-y: auto;
+  font-size: 13px; line-height: 1.7;
+}
+.right h3 { color: #e94560; font-size: 14px; margin: 14px 0 6px; border-bottom: 1px solid #2a2a3a; padding-bottom: 4px; }
+.right h3:first-child { margin-top: 0; }
+.formula { background: #1a1a2e; padding: 8px 12px; border-radius: 6px; margin: 6px 0; font-family: 'Consolas', monospace; font-size: 12px; color: #e0e0e0; }
+.formula .hl { color: #4ecdc4; }
+.formula .kw { color: #e94560; }
+.formula .num { color: #ffd700; }
+.debug-row { display: flex; justify-content: space-between; }
+.debug-row span:first-child { color: #889; }
+.debug-row span:last-child { color: #4ecdc4; font-family: 'Consolas', monospace; }
+button {
+  padding: 8px 18px; border: 1px solid #2a2a3a; border-radius: 6px;
+  background: #1a1a2e; color: #ccc; cursor: pointer; font-size: 12px;
+  margin: 4px; transition: all 0.15s;
+}
+button:hover { background: #2a2a4a; }
+button.active { background: #e94560; border-color: #e94560; }
+#pixelInfo { color: #ffd700; font-size: 12px; margin: 4px 0; }
+#traceLog { color: #aaa; font-size: 12px; line-height: 1.6; }
+#traceLog .step { color: #4ecdc4; font-weight: bold; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="left">
+    <h2>光线追踪 · 实时渲染</h2>
+    <canvas id="canvas"></canvas>
+    <div class="render-info">
+      分辨率: <span id="resInfo">200×150</span> ·
+      每像素采样: <span id="sppInfo">1</span> ·
+      耗时: <span id="timeInfo">-</span>
+    </div>
+    <div>
+      <button id="btn200" class="active">200×150</button>
+      <button id="btn400">400×300</button>
+      <button id="btnReRender">重新渲染</button>
+    </div>
+    <p id="pixelInfo">点击画布查看像素的光线追踪过程 →</p>
+  </div>
+
+  <div class="right" id="rightPanel">
+    <h3>场景设定</h3>
+    <div style="font-size:12px;color:#889">
+      相机在 z=-3 位置，看向 +z 方向<br>
+      场景：地面平面(y=-1) + 三个球体 + 点光源<br>
+      <span style="color:#e94560">红色球</span> 镜面 ·
+      <span style="color:#4ecdc4">青色球</span> 漫反射 ·
+      <span style="color:#ffd700">金色球</span> 半镜面
+    </div>
+
+    <h3>1. 光线方程</h3>
+    <div class="formula"><span class="hl">P</span> = <span class="hl">O</span> + t · <span class="hl">D</span></div>
+    <div style="font-size:12px;color:#889">
+      光线从原点 <b>O</b> 沿方向 <b>D</b> 走距离 t，到达 <b>P</b><br>
+      ← 这是整条渲染管线的基础
+    </div>
+
+    <h3>2. 球体求交（二次方程）</h3>
+    <div class="formula" style="font-size:11px">
+      代入 |<span class="hl">O</span>+t<span class="hl">D</span>-<span class="hl">C</span>|² = R²<br>
+      a = <span class="hl">D</span>·<span class="hl">D</span> &nbsp; b = 2(<span class="hl">O</span>-<span class="hl">C</span>)·<span class="hl">D</span> &nbsp; c = |<span class="hl">O</span>-<span class="hl">C</span>|² - R²<br>
+      Δ = b² - <span class="kw">4</span>ac<br>
+      <span class="kw">if</span> Δ &lt; <span class="num">0</span>: 未命中 &nbsp; else: t = (-b - √Δ) / <span class="kw">2</span>a (取近点)
+    </div>
+
+    <h3>3. Lambert 漫反射（明暗）</h3>
+    <div class="formula">brightness = max(<span class="num">0</span>, <span class="hl">N</span>·<span class="hl">L</span>)</div>
+    <div style="font-size:12px;color:#889">
+      <b>N</b> = 表面法线（指向外侧） · <b>L</b> = 指向光源的方向<br>
+      越正对光源越亮，背面全黑 → 这就是"影子"的由来
+    </div>
+
+    <h3>4. 镜面反射</h3>
+    <div class="formula"><span class="hl">R</span> = <span class="hl">D</span> - <span class="kw">2</span>(<span class="hl">D</span>·<span class="hl">N</span>)<span class="hl">N</span></div>
+    <div style="font-size:12px;color:#889">
+      入射方向 <b>D</b> 打中法线 <b>N</b> 的表面，反射方向 <b>R</b>
+    </div>
+
+    <h3>5. 阴影检测</h3>
+    <div style="font-size:12px;color:#889">
+      从命中点向光源再发一条"影子射线"<br>
+      如果中途被别的物体挡住 → 该点在阴影中
+    </div>
+
+    <h3>🔍 点击像素追踪日志</h3>
+    <div id="traceLog" style="font-size:11px;color:#667">点击左侧画布任意像素查看光线追踪过程</div>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+let W = 200, H = 150;
+canvas.width = W; canvas.height = H;
+canvas.style.width = W * 2 + 'px';
+canvas.style.height = H * 2 + 'px';
+
+// ---- Scene ----
+const SPHERES = [
+  { c: [ 0.5, -0.4, 1.5], r: 0.55, color: [1.0, 0.25, 0.3], name: '红色球', refl: 0.7 },
+  { c: [-0.6, -0.5, 2.2], r: 0.45, color: [0.3, 0.8, 0.75], name: '青色球', refl: 0.05 },
+  { c: [ 0.3,  0.0, 2.8], r: 0.35, color: [1.0, 0.84, 0.0], name: '金色球', refl: 0.4 },
+];
+const LIGHT = { pos: [2.0, 2.5, 0.5], color: [1.0, 1.0, 0.95] };
+const AMBIENT = [0.05, 0.05, 0.08];
+const FLOOR_Y = -1.0;
+const FLOOR_COLOR = [0.3, 0.35, 0.4];
+
+// ---- Vec3 helpers ----
+function vec(a, b) { return [a[0]-b[0], a[1]-b[1], a[2]-b[2]]; }
+function add(a, b) { return [a[0]+b[0], a[1]+b[1], a[2]+b[2]]; }
+function mul(v, s) { return [v[0]*s, v[1]*s, v[2]*s]; }
+function dot(a, b) { return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]; }
+function len(v) { return Math.sqrt(dot(v, v)); }
+function norm(v) { const l = len(v); return l > 0 ? [v[0]/l, v[1]/l, v[2]/l] : v; }
+function reflect(d, n) { const s = 2 * dot(d, n); return [d[0]-s*n[0], d[1]-s*n[1], d[2]-s*n[2]]; }
+
+// ---- Ray-sphere intersection ----
+// Returns { t, point, normal, obj } or null
+function hitSphere(rayO, rayD, sphere) {
+  const oc = vec(rayO, sphere.c);
+  const a = dot(rayD, rayD);
+  const b = 2 * dot(oc, rayD);
+  const c = dot(oc, oc) - sphere.r * sphere.r;
+  const disc = b * b - 4 * a * c;
+  if (disc < 0) return null;
+  const t = (-b - Math.sqrt(disc)) / (2 * a);
+  if (t < 0.001) return null;
+  const point = add(rayO, mul(rayD, t));
+  return {
+    t,
+    point,
+    normal: norm(vec(point, sphere.c)),
+    obj: sphere
+  };
+}
+
+// ---- Ray-plane intersection (y = floorY) ----
+function hitFloor(rayO, rayD) {
+  if (Math.abs(rayD[1]) < 0.0001) return null;
+  const t = (FLOOR_Y - rayO[1]) / rayD[1];
+  if (t < 0.001) return null;
+  const point = add(rayO, mul(rayD, t));
+  // Checkerboard for visual interest
+  const cx = Math.floor(point[0] * 2);
+  const cz = Math.floor(point[2] * 2);
+  const checker = (cx + cz) % 2 === 0;
+  return {
+    t,
+    point,
+    normal: [0, 1, 0],
+    obj: { name: '地面', color: checker ? FLOOR_COLOR : [0.25, 0.3, 0.35], refl: 0.02 }
+  };
+}
+
+// ---- Find closest hit in scene ----
+function traceScene(rayO, rayD) {
+  let best = hitFloor(rayO, rayD);
+  for (const s of SPHERES) {
+    const h = hitSphere(rayO, rayD, s);
+    if (h && (!best || h.t < best.t)) best = h;
+  }
+  return best;
+}
+
+// ---- Detailed trace for debugging ----
+let debugLog = [];
+function debugTrace(rayO, rayD, depth) {
+  if (depth > 3) { debugLog.push('  '.repeat(depth) + '→ 达到最大追踪深度(3)，停止'); return [0,0,0]; }
+
+  const hit = traceScene(rayO, rayD);
+  if (!hit) {
+    debugLog.push('  '.repeat(depth) + '→ 未命中任何物体，返回背景色 (0,0,0)');
+    return [0, 0, 0];
+  }
+
+  debugLog.push('  '.repeat(depth) + `→ 命中: ${hit.obj.name} (距离 t=${hit.t.toFixed(3)})`);
+  debugLog.push('  '.repeat(depth) + `  命中点 P=(${hit.point[0].toFixed(3)}, ${hit.point[1].toFixed(3)}, ${hit.point[2].toFixed(3)})`);
+  debugLog.push('  '.repeat(depth) + `  法线 N=(${hit.normal[0].toFixed(3)}, ${hit.normal[1].toFixed(3)}, ${hit.normal[2].toFixed(3)})`);
+
+  // Shadow ray
+  const toLight = vec(LIGHT.pos, hit.point);
+  const lightDist = len(toLight);
+  const lightDir = norm(toLight);
+  const shadowHit = traceScene(add(hit.point, mul(lightDir, 0.001)), lightDir);
+  const inShadow = shadowHit && shadowHit.t < lightDist;
+  debugLog.push('  '.repeat(depth) + `  阴影检测: L=(${lightDir[0].toFixed(2)}, ${lightDir[1].toFixed(2)}, ${lightDir[2].toFixed(2)}), 被遮挡=${inShadow}`);
+
+  // Lambert diffuse
+  const NdotL = Math.max(0, dot(hit.normal, lightDir));
+  const diffuse = inShadow ? [0,0,0] : mul(LIGHT.color, NdotL);
+  debugLog.push('  '.repeat(depth) + `  N·L = ${NdotL.toFixed(3)}, 漫反射贡献=(${diffuse[0].toFixed(2)}, ${diffuse[1].toFixed(2)}, ${diffuse[2].toFixed(2)})`);
+
+  // Ambient
+  debugLog.push('  '.repeat(depth) + `  环境光=(${AMBIENT[0].toFixed(2)}, ${AMBIENT[1].toFixed(2)}, ${AMBIENT[2].toFixed(2)})`);
+
+  let color = [
+    hit.obj.color[0] * (diffuse[0] + AMBIENT[0]),
+    hit.obj.color[1] * (diffuse[1] + AMBIENT[1]),
+    hit.obj.color[2] * (diffuse[2] + AMBIENT[2]),
+  ];
+
+  // Reflection
+  if (hit.obj.refl > 0) {
+    const reflDir = reflect(rayD, hit.normal);
+    debugLog.push('  '.repeat(depth) + `  镜面反射: 反射率=${hit.obj.refl.toFixed(2)}, R=(${reflDir[0].toFixed(3)}, ${reflDir[1].toFixed(3)}, ${reflDir[2].toFixed(3)})`);
+    debugLog.push('  '.repeat(depth) + '  ↓ 递归追踪反射光线...');
+    const reflColor = debugTrace(add(hit.point, mul(reflDir, 0.001)), reflDir, depth + 1);
+    color[0] = color[0] * (1 - hit.obj.refl) + reflColor[0] * hit.obj.refl;
+    color[1] = color[1] * (1 - hit.obj.refl) + reflColor[1] * hit.obj.refl;
+    color[2] = color[2] * (1 - hit.obj.refl) + reflColor[2] * hit.obj.refl;
+  }
+
+  return color;
+}
+
+// ---- Normal trace (fast, for rendering) ----
+function trace(rayO, rayD, depth) {
+  if (depth > 3) return [0, 0, 0];
+  const hit = traceScene(rayO, rayD);
+  if (!hit) return [0, 0, 0];
+
+  const toLight = vec(LIGHT.pos, hit.point);
+  const lightDist = len(toLight);
+  const lightDir = norm(toLight);
+  const shadowHit = traceScene(add(hit.point, mul(lightDir, 0.001)), lightDir);
+  const inShadow = shadowHit && shadowHit.t < lightDist;
+
+  const NdotL = Math.max(0, dot(hit.normal, lightDir));
+  const diffuse = inShadow ? [0,0,0] : mul(LIGHT.color, NdotL);
+
+  let color = [
+    hit.obj.color[0] * (diffuse[0] + AMBIENT[0]),
+    hit.obj.color[1] * (diffuse[1] + AMBIENT[1]),
+    hit.obj.color[2] * (diffuse[2] + AMBIENT[2]),
+  ];
+
+  if (hit.obj.refl > 0) {
+    const reflDir = reflect(rayD, hit.normal);
+    const reflColor = trace(add(hit.point, mul(reflDir, 0.001)), reflDir, depth + 1);
+    color[0] = color[0] * (1 - hit.obj.refl) + reflColor[0] * hit.obj.refl;
+    color[1] = color[1] * (1 - hit.obj.refl) + reflColor[1] * hit.obj.refl;
+    color[2] = color[2] * (1 - hit.obj.refl) + reflColor[2] * hit.obj.refl;
+  }
+  return color;
+}
+
+function clamp(v) { return Math.max(0, Math.min(255, Math.floor(v * 255))); }
+
+// ---- Render ----
+let imageData = null;
+
+function render() {
+  document.getElementById('timeInfo').textContent = '渲染中...';
+  const start = performance.now();
+  imageData = ctx.createImageData(W, H);
+
+  // Camera at origin, looking +Z
+  const camO = [0, 0.1, -3];
+  const viewH = 2.0;
+  const viewW = viewH * W / H;
+  const halfW = viewW / 2;
+  const halfH = viewH / 2;
+
+  for (let py = 0; py < H; py++) {
+    for (let px = 0; px < W; px++) {
+      const u = (px / W - 0.5) * viewW;
+      const v = -(py / H - 0.5) * viewH;
+      const rayD = norm([u, v, 4]); // 4 = focal length, looking +Z
+
+      const c = trace(camO, rayD, 0);
+      const i = (py * W + px) * 4;
+      imageData.data[i]     = clamp(c[0]);
+      imageData.data[i + 1] = clamp(c[1]);
+      imageData.data[i + 2] = clamp(c[2]);
+      imageData.data[i + 3] = 255;
+    }
+  }
+
+  ctx.putImageData(imageData, 0, 0);
+  document.getElementById('timeInfo').textContent = (performance.now() - start).toFixed(0) + 'ms';
+}
+
+// ---- Click to debug pixel ----
+canvas.addEventListener('click', e => {
+  const rect = canvas.getBoundingClientRect();
+  const sx = canvas.width / rect.width;
+  const sy = canvas.height / rect.height;
+  const px = Math.floor((e.clientX - rect.left) * sx);
+  const py = Math.floor((e.clientY - rect.top) * sy);
+  if (px < 0 || px >= W || py < 0 || py >= H) return;
+
+  const viewH = 2.0;
+  const viewW = viewH * W / H;
+  const u = (px / W - 0.5) * viewW;
+  const v = -(py / H - 0.5) * viewH;
+  const camO = [0, 0.1, -3];
+  const rayD = norm([u, v, 4]);
+
+  // Get rendered color
+  const i = (py * W + px) * 4;
+  const r = imageData.data[i], g = imageData.data[i+1], b = imageData.data[i+2];
+
+  debugLog = [];
+  debugLog.push(`像素 (${px}, ${py}): 方向D=(${rayD[0].toFixed(4)}, ${rayD[1].toFixed(4)}, ${rayD[2].toFixed(4)})`);
+  debugLog.push('');
+
+  const color = debugTrace(camO, rayD, 0);
+
+  // Build display
+  let html = `<span class="step">▸ 像素 (${px}, ${py})</span> — 最终颜色: <span style="color:rgb(${r},${g},${b})">rgb(${r},${g},${b})</span>`;
+  html += '<br><span style="color:#667">光线方向 D=(' + rayD.map(x=>x.toFixed(4)).join(', ') + ')</span>';
+  html += '<br>';
+  for (const line of debugLog) {
+    if (line.startsWith('→')) html += '<br><span style="color:#4ecdc4">' + line + '</span>';
+    else if (line.startsWith('  →')) html += '<br><span style="color:#aaa">' + line + '</span>';
+    else html += '<br>' + line;
+  }
+
+  document.getElementById('traceLog').innerHTML = html;
+  document.getElementById('pixelInfo').textContent = `选中像素 (${px}, ${py}) — 右侧查看完整追踪过程`;
+});
+
+// ---- UI ----
+document.getElementById('btn200').onclick = () => {
+  W = 200; H = 150; canvas.width = W; canvas.height = H;
+  canvas.style.width = W * 2 + 'px'; canvas.style.height = H * 2 + 'px';
+  document.getElementById('resInfo').textContent = '200×150';
+  document.getElementById('btn200').classList.add('active');
+  document.getElementById('btn400').classList.remove('active');
+  render();
+};
+document.getElementById('btn400').onclick = () => {
+  W = 400; H = 300; canvas.width = W; canvas.height = H;
+  canvas.style.width = W * 1.5 + 'px'; canvas.style.height = H * 1.5 + 'px';
+  document.getElementById('resInfo').textContent = '400×300';
+  document.getElementById('btn400').classList.add('active');
+  document.getElementById('btn200').classList.remove('active');
+  render();
+};
+document.getElementById('btnReRender').onclick = render;
+
+// ---- Start ----
+render();
+</script>
+</body>
+</html>
