@@ -26,18 +26,19 @@ h1 { font-size: 18px; color: #4ecdc4; text-align: center; letter-spacing: 2px; m
 .col h3 { font-size: 14px; margin-bottom: 4px; }
 .col h3.bfs { color: #3498db; }
 .col h3.astar { color: #e94560; }
+.canvas-wrap { position: relative; display: inline-block; }
 canvas {
-  background: #1a1a2e;
+  background: #fff;
   border-radius: 4px;
   cursor: crosshair;
   image-rendering: pixelated;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+  border: 1px solid #333;
 }
 .stats {
-  margin-top: 6px; font-size: 11px; color: #667; line-height: 1.6;
+  margin-top: 6px; font-size: 11px; color: #889; line-height: 1.6;
 }
-.stats span { font-family: 'Consolas', monospace; }
-.stats .v { color: #4ecdc4; }
+.stats .v { color: #4ecdc4; font-family: 'Consolas', monospace; font-weight: bold; }
 .stats .win { color: #ffd700; font-weight: bold; }
 
 .controls {
@@ -66,32 +67,43 @@ button.primary:hover { background: #f0506a; }
   display: flex; gap: 14px; justify-content: center; margin-top: 10px; font-size: 10px; color: #555; flex-wrap: wrap;
 }
 .legend span { display: flex; align-items: center; gap: 4px; }
-.legend .dot { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+.legend .dot { width: 10px; height: 10px; border-radius: 2px; display: inline-block; border: 1px solid rgba(255,255,255,0.1); }
+
+.speed-row {
+  display: flex; gap: 6px; align-items: center; justify-content: center;
+  margin-top: 6px; font-size: 11px; color: #667;
+}
+.speed-row input { width: 60px; }
 </style>
 </head>
 <body>
 <div class="app">
   <h1>A* vs BFS 寻路对比</h1>
-  <p class="sub">同一张地图，两种算法 — 点击/拖拽编辑障碍物</p>
+  <p class="sub">动画实时展示搜索过程 · 点击/拖拽编辑障碍物</p>
 
   <div class="dual">
     <div class="col">
       <h3 class="bfs">BFS 广度优先</h3>
-      <canvas id="bfsCanvas"></canvas>
+      <div class="canvas-wrap"><canvas id="bfsCanvas"></canvas></div>
       <div class="stats" id="bfsStats">等待运行...</div>
     </div>
     <div class="col">
       <h3 class="astar">A* (Manhattan 启发式)</h3>
-      <canvas id="astarCanvas"></canvas>
+      <div class="canvas-wrap"><canvas id="astarCanvas"></canvas></div>
       <div class="stats" id="astarStats">等待运行...</div>
     </div>
   </div>
 
   <div class="controls">
-    <button id="btnRun" class="primary">▶ 运行对比</button>
+    <button id="btnRun" class="primary">▶ 运行动画</button>
+    <button id="btnInstant">⚡ 即时结果</button>
     <button id="btnRandom">🎲 随机地图</button>
     <button id="btnClear">🗑 清空障碍</button>
-    <button id="btnDraw">✏ 编辑模式</button>
+  </div>
+
+  <div class="speed-row">
+    动画速度: <input type="range" id="speedSlider" min="1" max="20" value="5" style="vertical-align:middle">
+    <span id="speedLabel">每帧5步</span>
   </div>
 
   <div class="seed-row">
@@ -100,12 +112,14 @@ button.primary:hover { background: #f0506a; }
   </div>
 
   <div class="legend">
+    <span><span class="dot" style="background:#fff"></span>空地</span>
     <span><span class="dot" style="background:#2ecc71"></span>起点</span>
     <span><span class="dot" style="background:#e74c3c"></span>终点</span>
-    <span><span class="dot" style="background:#444"></span>障碍</span>
-    <span><span class="dot" style="background:rgba(52,152,219,0.4)"></span>已探索(BFS)</span>
-    <span><span class="dot" style="background:rgba(233,69,96,0.4)"></span>已探索(A*)</span>
-    <span><span class="dot" style="background:#ffd700"></span>最短路径</span>
+    <span><span class="dot" style="background:#2c3e50"></span>障碍</span>
+    <span><span class="dot" style="background:#bdd7ee"></span>BFS探索</span>
+    <span><span class="dot" style="background:#f9c6d4"></span>A*探索</span>
+    <span><span class="dot" style="background:#f1c40f"></span>最短路径</span>
+    <span><span class="dot" style="background:#000"></span>当前前沿</span>
   </div>
 </div>
 
@@ -125,9 +139,12 @@ const astarCtx = astarCanvas.getContext('2d');
 let walls = Array.from({length: ROWS}, () => Array(COLS).fill(false));
 let start = [2, Math.floor(ROWS/2)];
 let goal = [COLS-3, Math.floor(ROWS/2)];
-let bfsResult = null, astarResult = null;
-let drawMode = true;
+let bfsHistory = null, astarHistory = null; // [{x,y,type:'visit'|'frontier'}, ...]
+let bfsPath = null, astarPath = null;
+let bfsExplored = 0, astarExplored = 0;
+let bfsTime = 0, astarTime = 0;
 let sampleCount = 0;
+let animId = null;
 
 // ---- Seeded RNG ----
 function mulberry32(a) {
@@ -139,8 +156,8 @@ function mulberry32(a) {
   };
 }
 
-// ---- BFS ----
-function runBFS() {
+// ---- BFS with history recording ----
+function runBFS(record) {
   const visited = Array.from({length: ROWS}, () => Array(COLS).fill(false));
   const parent = Array.from({length: ROWS}, () => Array(COLS).fill(null));
   const queue = [start];
@@ -151,6 +168,7 @@ function runBFS() {
   while (queue.length) {
     const [cx, cy] = queue.shift();
     explored++;
+    if (record) record.push({ x: cx, y: cy, type: 'visit' });
 
     if (cx === goal[0] && cy === goal[1]) break;
 
@@ -161,6 +179,7 @@ function runBFS() {
       visited[ny][nx] = true;
       parent[ny][nx] = [cx, cy];
       queue.push([nx, ny]);
+      if (record) record.push({ x: nx, y: ny, type: 'frontier' });
     }
   }
 
@@ -174,30 +193,28 @@ function runBFS() {
     cur = parent[cur[1]][cur[0]];
   }
   path.reverse();
-  if (path[0][0] !== start[0] || path[0][1] !== start[1]) path.length = 0; // no path
+  if (path.length === 0 || path[0][0] !== start[0] || path[0][1] !== start[1]) return { path: [], explored, time: t1 - t0 };
 
-  return { visited, path, explored, time: t1 - t0 };
+  return { path, explored, time: t1 - t0 };
 }
 
-// ---- A* ----
-function runAStar() {
+// ---- A* with history recording ----
+function runAStar(record) {
   const visited = Array.from({length: ROWS}, () => Array(COLS).fill(false));
   const parent = Array.from({length: ROWS}, () => Array(COLS).fill(null));
   const gScore = Array.from({length: ROWS}, () => Array(COLS).fill(Infinity));
   const fScore = Array.from({length: ROWS}, () => Array(COLS).fill(Infinity));
 
-  const h = (x, y) => Math.abs(x - goal[0]) + Math.abs(y - goal[1]); // Manhattan
+  const h = (x, y) => Math.abs(x - goal[0]) + Math.abs(y - goal[1]);
 
   gScore[start[1]][start[0]] = 0;
   fScore[start[1]][start[0]] = h(start[0], start[1]);
 
-  // Min-heap priority queue
   const open = [{ x: start[0], y: start[1], f: fScore[start[1]][start[0]] }];
   let explored = 0;
   const t0 = performance.now();
 
   while (open.length) {
-    // Pop min f-score
     let minIdx = 0;
     for (let i = 1; i < open.length; i++) {
       if (open[i].f < open[minIdx].f) minIdx = i;
@@ -206,6 +223,7 @@ function runAStar() {
     if (visited[cy][cx]) continue;
     visited[cy][cx] = true;
     explored++;
+    if (record) record.push({ x: cx, y: cy, type: 'visit' });
 
     if (cx === goal[0] && cy === goal[1]) break;
 
@@ -219,13 +237,13 @@ function runAStar() {
         gScore[ny][nx] = tg;
         fScore[ny][nx] = tg + h(nx, ny);
         open.push({ x: nx, y: ny, f: fScore[ny][nx] });
+        if (record) record.push({ x: nx, y: ny, type: 'frontier' });
       }
     }
   }
 
   const t1 = performance.now();
 
-  // Reconstruct path
   const path = [];
   let cur = goal;
   while (cur) {
@@ -233,106 +251,204 @@ function runAStar() {
     cur = parent[cur[1]][cur[0]];
   }
   path.reverse();
-  if (path[0][0] !== start[0] || path[0][1] !== start[1]) path.length = 0;
+  if (path.length === 0 || path[0][0] !== start[0] || path[0][1] !== start[1]) return { path: [], explored, time: t1 - t0 };
 
-  return { visited, path, explored, time: t1 - t0 };
+  return { path, explored, time: t1 - t0 };
 }
 
 // ---- Drawing ----
-function drawCanvas(ctx, result, visitedColor) {
+function drawFrame(ctx, visitedSet, frontierSet, pathSet, isAStar) {
   ctx.clearRect(0, 0, COLS * CELL, ROWS * CELL);
 
-  // Background grid
-  ctx.strokeStyle = 'rgba(255,255,255,0.03)';
-  ctx.lineWidth = 0.5;
-  for (let x = 0; x <= COLS; x++) { ctx.beginPath(); ctx.moveTo(x*CELL,0); ctx.lineTo(x*CELL,ROWS*CELL); ctx.stroke(); }
-  for (let y = 0; y <= ROWS; y++) { ctx.beginPath(); ctx.moveTo(0,y*CELL); ctx.lineTo(COLS*CELL,y*CELL); ctx.stroke(); }
+  // White background
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, COLS * CELL, ROWS * CELL);
 
   // Walls
   for (let y = 0; y < ROWS; y++)
     for (let x = 0; x < COLS; x++)
       if (walls[y][x]) {
-        ctx.fillStyle = '#333';
-        ctx.fillRect(x * CELL + 1, y * CELL + 1, CELL - 2, CELL - 2);
+        ctx.fillStyle = '#2c3e50';
+        ctx.fillRect(x * CELL, y * CELL, CELL, CELL);
       }
 
-  // Visited cells (if result exists)
-  if (result && result.visited) {
-    for (let y = 0; y < ROWS; y++)
-      for (let x = 0; x < COLS; x++)
-        if (result.visited[y][x] && !(x === start[0] && y === start[1]) && !(x === goal[0] && y === goal[1])) {
-          ctx.fillStyle = visitedColor;
-          ctx.fillRect(x * CELL + 1, y * CELL + 1, CELL - 2, CELL - 2);
-        }
+  // Grid lines (subtle)
+  ctx.strokeStyle = 'rgba(0,0,0,0.04)';
+  ctx.lineWidth = 0.5;
+  for (let x = 0; x <= COLS; x++) { ctx.beginPath(); ctx.moveTo(x*CELL,0); ctx.lineTo(x*CELL,ROWS*CELL); ctx.stroke(); }
+  for (let y = 0; y <= ROWS; y++) { ctx.beginPath(); ctx.moveTo(0,y*CELL); ctx.lineTo(COLS*CELL,y*CELL); ctx.stroke(); }
+
+  // Visited cells
+  for (const k of visitedSet) {
+    const [x, y] = k.split(',').map(Number);
+    if ((x === start[0] && y === start[1]) || (x === goal[0] && y === goal[1])) continue;
+    ctx.fillStyle = isAStar ? '#f9c6d4' : '#bdd7ee';
+    ctx.fillRect(x * CELL, y * CELL, CELL, CELL);
+  }
+
+  // Frontier cells (brighter)
+  for (const k of frontierSet) {
+    const [x, y] = k.split(',').map(Number);
+    if ((x === start[0] && y === start[1]) || (x === goal[0] && y === goal[1])) continue;
+    if (visitedSet.has(k)) continue;
+    ctx.fillStyle = isAStar ? '#e94560' : '#2980b9';
+    ctx.fillRect(x * CELL, y * CELL, CELL, CELL);
   }
 
   // Path
-  if (result && result.path && result.path.length > 0) {
-    ctx.fillStyle = '#ffd700';
-    for (const [px, py] of result.path) {
-      if ((px === start[0] && py === start[1]) || (px === goal[0] && py === goal[1])) continue;
-      ctx.fillRect(px * CELL + 1, py * CELL + 1, CELL - 2, CELL - 2);
-    }
+  for (const k of pathSet) {
+    const [x, y] = k.split(',').map(Number);
+    if ((x === start[0] && y === start[1]) || (x === goal[0] && y === goal[1])) continue;
+    ctx.fillStyle = '#f1c40f';
+    ctx.fillRect(x * CELL, y * CELL, CELL, CELL);
   }
 
   // Start
   ctx.fillStyle = '#2ecc71';
-  ctx.fillRect(start[0] * CELL + 1, start[1] * CELL + 1, CELL - 2, CELL - 2);
+  ctx.fillRect(start[0] * CELL, start[1] * CELL, CELL, CELL);
 
   // Goal
   ctx.fillStyle = '#e74c3c';
-  ctx.fillRect(goal[0] * CELL + 1, goal[1] * CELL + 1, CELL - 2, CELL - 2);
+  ctx.fillRect(goal[0] * CELL, goal[1] * CELL, CELL, CELL);
 }
 
-// ---- Run comparison ----
-function runComparison() {
-  bfsResult = runBFS();
-  astarResult = runAStar();
+// ---- Animation ----
+function animate() {
+  if (animId) cancelAnimationFrame(animId);
+
+  const bfsRec = [];
+  const astarRec = [];
+  const bfsRes = runBFS(bfsRec);
+  const astarRes = runAStar(astarRec);
+
+  bfsExplored = bfsRes.explored; bfsTime = bfsRes.time;
+  astarExplored = astarRes.explored; astarTime = astarRes.time;
+  bfsPath = bfsRes.path; astarPath = astarRes.path;
   sampleCount++;
 
-  drawCanvas(bfsCtx, bfsResult, 'rgba(52,152,219,0.35)');
-  drawCanvas(astarCtx, astarResult, 'rgba(233,69,96,0.35)');
+  const bfsVisited = new Set();
+  const bfsFrontier = new Set();
+  const astarVisited = new Set();
+  const astarFrontier = new Set();
+  const bfsPathSet = new Set(bfsPath.map(p => p.join(',')));
+  const astarPathSet = new Set(astarPath.map(p => p.join(',')));
 
-  // Stats
-  const bp = bfsResult.path.length > 0 ? bfsResult.path.length : '—';
-  const ap = astarResult.path.length > 0 ? astarResult.path.length : '—';
-  const bfsFaster = bfsResult.time < astarResult.time;
+  const maxLen = Math.max(bfsRec.length, astarRec.length);
+  const stepsPerFrame = parseInt(document.getElementById('speedSlider').value);
+  let frame = 0;
+
+  function step() {
+    const target = Math.min(frame + stepsPerFrame, maxLen);
+
+    // Process BFS records up to target
+    for (let i = frame; i < target && i < bfsRec.length; i++) {
+      const r = bfsRec[i];
+      const key = r.x + ',' + r.y;
+      if (r.type === 'visit') {
+        bfsFrontier.delete(key);
+        bfsVisited.add(key);
+      } else {
+        bfsFrontier.add(key);
+      }
+    }
+
+    // Process A* records up to target
+    for (let i = frame; i < target && i < astarRec.length; i++) {
+      const r = astarRec[i];
+      const key = r.x + ',' + r.y;
+      if (r.type === 'visit') {
+        astarFrontier.delete(key);
+        astarVisited.add(key);
+      } else {
+        astarFrontier.add(key);
+      }
+    }
+
+    // Draw
+    drawFrame(bfsCtx, bfsVisited, bfsFrontier, frame >= bfsRec.length ? bfsPathSet : new Set(), false);
+    drawFrame(astarCtx, astarVisited, astarFrontier, frame >= astarRec.length ? astarPathSet : new Set(), true);
+
+    frame = target;
+
+    if (frame >= maxLen) {
+      // Done - show final stats
+      updateStats(true);
+      animId = null;
+    } else {
+      animId = requestAnimationFrame(step);
+    }
+  }
+
+  animId = requestAnimationFrame(step);
+}
+
+function showInstant() {
+  if (animId) { cancelAnimationFrame(animId); animId = null; }
+
+  const bfsRes = runBFS(null);
+  const astarRes = runAStar(null);
+  bfsExplored = bfsRes.explored; bfsTime = bfsRes.time;
+  astarExplored = astarRes.explored; astarTime = astarRes.time;
+  bfsPath = bfsRes.path; astarPath = astarRes.path;
+  sampleCount++;
+
+  const bfsVisited = new Set();
+  const astarVisited = new Set();
+  // Mark all visited cells (we don't have history for instant mode, so reconstruct visited set from path isn't accurate)
+  // For instant mode, just show path and let user see the difference in explored count
+  // Actually, we need visited sets. Let's re-run with recording but skip animation.
+  const bfsRec2 = [], astarRec2 = [];
+  runBFS(bfsRec2); runAStar(astarRec2);
+  for (const r of bfsRec2) if (r.type === 'visit') bfsVisited.add(r.x+','+r.y);
+  for (const r of astarRec2) if (r.type === 'visit') astarVisited.add(r.x+','+r.y);
+
+  const bfsPathSet = new Set(bfsPath.map(p => p.join(',')));
+  const astarPathSet = new Set(astarPath.map(p => p.join(',')));
+
+  drawFrame(bfsCtx, bfsVisited, new Set(), bfsPathSet, false);
+  drawFrame(astarCtx, astarVisited, new Set(), astarPathSet, true);
+  updateStats(false);
+}
+
+function updateStats(animated) {
+  const bp = bfsPath.length > 0 ? bfsPath.length : '—';
+  const ap = astarPath.length > 0 ? astarPath.length : '—';
+  const bfsFaster = bfsTime < astarTime;
+  const saved = bfsExplored > 0 ? Math.round((1 - astarExplored / bfsExplored) * 100) : 0;
+
+  const extra = animated ? ' <span style="color:#e94560">(动画播放中)</span>' : '';
 
   document.getElementById('bfsStats').innerHTML =
-    `<span class="v">${bfsResult.explored}</span> 节点探索 · 路径 <span class="v">${bp}</span> 步 · <span class="v">${bfsResult.time.toFixed(2)}ms</span>` +
-    (bfsFaster ? ' <span class="win">更快!</span>' : '');
+    `<span class="v">${bfsExplored}</span> 节点 · 路径 <span class="v">${bp}</span> 步 · <span class="v">${bfsTime.toFixed(2)}ms</span>` +
+    (bfsFaster ? ' <span class="win">更快!</span>' : '') + extra;
 
   document.getElementById('astarStats').innerHTML =
-    `<span class="v">${astarResult.explored}</span> 节点探索 · 路径 <span class="v">${ap}</span> 步 · <span class="v">${astarResult.time.toFixed(2)}ms</span>` +
+    `<span class="v">${astarExplored}</span> 节点 · 路径 <span class="v">${ap}</span> 步 · <span class="v">${astarTime.toFixed(2)}ms</span>` +
     (!bfsFaster ? ' <span class="win">更快!</span>' : '') +
-    ` (节省 ${bfsResult.explored > 0 ? Math.round((1 - astarResult.explored / bfsResult.explored) * 100) : 0}% 探索)`;
+    ` (少探索 <span class="v">${saved}%</span>)` + extra;
 
   document.getElementById('sampleInfo').textContent = `共 ${sampleCount} 组样本`;
 }
 
 // ---- Randomize ----
 function randomize() {
+  if (animId) { cancelAnimationFrame(animId); animId = null; }
   const seed = parseInt(document.getElementById('seedInput').value) || Date.now();
   document.getElementById('seedInput').value = seed;
   const rng = mulberry32(seed);
 
-  // Clear
   walls = Array.from({length: ROWS}, () => Array(COLS).fill(false));
 
-  // Random obstacles (~30% density, avoid edges)
   for (let y = 0; y < ROWS; y++)
     for (let x = 0; x < COLS; x++)
       if (rng() < 0.30) walls[y][x] = true;
 
-  // Random start (left side, top half)
   start = [Math.floor(rng() * (COLS/4)) + 1, Math.floor(rng() * (ROWS/2)) + 1];
   walls[start[1]][start[0]] = false;
 
-  // Random goal (right side, bottom half)
   goal = [COLS - 2 - Math.floor(rng() * (COLS/4)), ROWS - 2 - Math.floor(rng() * (ROWS/2))];
   walls[goal[1]][goal[0]] = false;
 
-  // Clear small area around start and goal
   for (const [sx, sy] of [start, goal]) {
     for (let dy = -1; dy <= 1; dy++)
       for (let dx = -1; dx <= 1; dx++) {
@@ -341,27 +457,31 @@ function randomize() {
       }
   }
 
-  bfsResult = null; astarResult = null;
-  drawCanvas(bfsCtx, null);
-  drawCanvas(astarCtx, null);
+  bfsHistory = null; astarHistory = null; bfsPath = null; astarPath = null;
+  const empty = new Set();
+  drawFrame(bfsCtx, empty, empty, empty, false);
+  drawFrame(astarCtx, empty, empty, empty, true);
   document.getElementById('bfsStats').textContent = '等待运行...';
   document.getElementById('astarStats').textContent = '等待运行...';
 }
 
 function clearWalls() {
+  if (animId) { cancelAnimationFrame(animId); animId = null; }
   walls = Array.from({length: ROWS}, () => Array(COLS).fill(false));
-  bfsResult = null; astarResult = null;
-  drawCanvas(bfsCtx, null);
-  drawCanvas(astarCtx, null);
+  bfsHistory = null; astarHistory = null; bfsPath = null; astarPath = null;
+  const empty = new Set();
+  drawFrame(bfsCtx, empty, empty, empty, false);
+  drawFrame(astarCtx, empty, empty, empty, true);
   document.getElementById('bfsStats').textContent = '等待运行...';
   document.getElementById('astarStats').textContent = '等待运行...';
 }
 
 // ---- Canvas editing ----
 function editCell(canvas, e) {
+  if (animId) { cancelAnimationFrame(animId); animId = null; }
   const rect = canvas.getBoundingClientRect();
-  const sx = (canvas === bfsCanvas ? bfsCanvas.width : astarCanvas.width) / rect.width;
-  const sy = (canvas === bfsCanvas ? bfsCanvas.height : astarCanvas.height) / rect.height;
+  const sx = canvas.width / rect.width;
+  const sy = canvas.height / rect.height;
   const mx = (e.clientX - rect.left) * sx;
   const my = (e.clientY - rect.top) * sy;
   const x = Math.floor(mx / CELL);
@@ -369,29 +489,27 @@ function editCell(canvas, e) {
   if (x < 0 || x >= COLS || y < 0 || y >= ROWS) return;
   if ((x === start[0] && y === start[1]) || (x === goal[0] && y === goal[1])) return;
   walls[y][x] = !walls[y][x];
-  bfsResult = null; astarResult = null;
-  drawCanvas(bfsCtx, null);
-  drawCanvas(astarCtx, null);
+  bfsHistory = null; astarHistory = null;
+  const empty = new Set();
+  drawFrame(bfsCtx, empty, empty, empty, false);
+  drawFrame(astarCtx, empty, empty, empty, true);
+  document.getElementById('bfsStats').textContent = '等待运行...';
+  document.getElementById('astarStats').textContent = '等待运行...';
 }
 
 [bfsCanvas, astarCanvas].forEach(c => {
-  c.addEventListener('click', e => { if (drawMode) editCell(c, e); });
-  c.addEventListener('mousemove', e => {
-    if (drawMode && e.buttons === 1) editCell(c, e);
-  });
+  c.addEventListener('click', e => editCell(c, e));
+  c.addEventListener('mousemove', e => { if (e.buttons === 1) editCell(c, e); });
 });
 
 // ---- UI ----
-document.getElementById('btnRun').onclick = runComparison;
+document.getElementById('btnRun').onclick = animate;
+document.getElementById('btnInstant').onclick = showInstant;
 document.getElementById('btnRandom').onclick = randomize;
 document.getElementById('btnClear').onclick = clearWalls;
-document.getElementById('btnDraw').onclick = function() {
-  drawMode = !drawMode;
-  this.textContent = drawMode ? '✏ 编辑模式' : '🔍 查看模式';
-  this.classList.toggle('active', drawMode);
-  [bfsCanvas, astarCanvas].forEach(c => {
-    c.style.cursor = drawMode ? 'crosshair' : 'default';
-  });
+
+document.getElementById('speedSlider').oninput = function() {
+  document.getElementById('speedLabel').textContent = '每帧' + this.value + '步';
 };
 
 document.getElementById('seedInput').addEventListener('keydown', e => {
@@ -400,7 +518,7 @@ document.getElementById('seedInput').addEventListener('keydown', e => {
 
 // ---- Start ----
 randomize();
-runComparison();
+animate();
 </script>
 </body>
 </html>
