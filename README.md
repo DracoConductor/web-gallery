@@ -10,3 +10,4 @@
 | [生命游戏](life-game/) | Conway's Game of Life，年龄着色 + 经典图案库 |
 | [A* vs BFS 寻路](pathfinding/) | 并排对比 A* 与 BFS，随机种子 + 计时统计 + 可编辑地图 |
 | [光线追踪学习器](ray-tracer/) | 交互式学习光线追踪原理，点击像素查看公式与计算过程 |
+| [物理力学沙盒](physics-sandbox/) | 2D 刚体碰撞模拟，动量守恒/摩擦力/弹簧/斜面，高中物理交互学习 |

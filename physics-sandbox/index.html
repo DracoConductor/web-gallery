@@ -1,0 +1,1148 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>物理力学沙盒</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #0a0a0f; color: #ccc;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  display: flex; justify-content: center; align-items: center;
+  min-height: 100vh; user-select: none; overflow: hidden;
+}
+.app { display: flex; gap: 12px; height: 95vh; align-items: stretch; }
+
+/* ---- Toolbar ---- */
+.toolbar {
+  width: 150px; background: #12121a; border-radius: 10px;
+  padding: 14px 10px; display: flex; flex-direction: column; gap: 8px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+}
+.toolbar h2 { font-size: 14px; color: #4ecdc4; text-align: center; letter-spacing: 2px; margin-bottom: 4px; }
+.toolbar label { font-size: 10px; color: #667; text-transform: uppercase; letter-spacing: 1px; }
+.tool-btn {
+  padding: 8px 12px; border: 1px solid #2a2a3a; border-radius: 6px;
+  background: #1a1a2e; color: #ccc; cursor: pointer; font-size: 11px;
+  transition: all 0.15s; text-align: center;
+}
+.tool-btn:hover { background: #2a2a4a; }
+.tool-btn.active { background: #e94560; border-color: #e94560; }
+.tool-btn.friction { background: #1a3a3a; border-color: #1a5a5a; }
+.tool-btn.friction.active { background: #e67e22; border-color: #e67e22; }
+.sep { border-top: 1px solid #2a2a3a; margin: 4px 0; }
+
+/* ---- Canvas ---- */
+.canvas-wrap {
+  position: relative; flex: 1; background: #12121a;
+  border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+  overflow: hidden;
+}
+canvas { display: block; cursor: crosshair; }
+.zoom-info {
+  position: absolute; bottom: 6px; right: 10px;
+  font-size: 10px; color: #555;
+}
+
+/* ---- Property Panel ---- */
+.props {
+  width: 200px; background: #12121a; border-radius: 10px;
+  padding: 14px 10px; overflow-y: auto;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+  display: flex; flex-direction: column; gap: 8px;
+}
+.props h3 { font-size: 13px; color: #e94560; text-align: center; }
+.props label { font-size: 10px; color: #667; }
+.props input[type=range] { width: 100%; }
+.props input[type=number] {
+  width: 60px; padding: 3px 6px; background: #1a1a2e;
+  border: 1px solid #2a2a3a; border-radius: 4px; color: #ccc; font-size: 11px;
+  text-align: center; font-family: 'Consolas', monospace;
+}
+.props .val-row { display: flex; justify-content: space-between; align-items: center; font-size: 11px; }
+.props .val-row .kv { color: #4ecdc4; font-family: 'Consolas', monospace; }
+.props .force-line { font-size: 10px; color: #889; line-height: 1.5; }
+.props .force-line .fn { color: #e94560; }
+.props .force-line .ff { color: #ffd700; }
+.props .force-line .fg { color: #4ecdc4; }
+
+.controls-row {
+  display: flex; gap: 6px; justify-content: center; margin-top: 4px; flex-wrap: wrap;
+}
+.controls-row button {
+  padding: 6px 14px; border: 1px solid #2a2a3a; border-radius: 5px;
+  background: #1a1a2e; color: #ccc; cursor: pointer; font-size: 11px;
+}
+.controls-row button:hover { background: #2a2a4a; }
+.controls-row button.playing { background: #e94560; border-color: #e94560; }
+
+/* Context menu */
+.ctx-menu {
+  position: fixed; background: #1a1a2e; border: 1px solid #3a3a5a;
+  border-radius: 6px; padding: 4px 0; z-index: 999; display: none;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.6); min-width: 140px;
+}
+.ctx-menu button {
+  display: block; width: 100%; padding: 6px 14px; border: none;
+  background: none; color: #ccc; cursor: pointer; font-size: 12px; text-align: left;
+}
+.ctx-menu button:hover { background: #2a2a4a; color: #fff; }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- Toolbar -->
+  <div class="toolbar">
+    <h2>力学沙盒</h2>
+    <label>放置物体</label>
+    <button class="tool-btn active" data-tool="ball">⚽ 小球</button>
+    <button class="tool-btn" data-tool="box">🟫 方块</button>
+    <button class="tool-btn" data-tool="tri">🔺 三角块</button>
+    <div class="sep"></div>
+    <label>连接件</label>
+    <button class="tool-btn" data-tool="spring">🌀 弹簧</button>
+    <button class="tool-btn" data-tool="rope">📏 绳索</button>
+    <div class="sep"></div>
+    <label>配合</label>
+    <button class="tool-btn friction" id="btnFriction">⚙ 设置摩擦</button>
+    <div class="sep"></div>
+    <label>全局参数</label>
+    <div class="val-row">g <input type="number" id="gVal" value="9.8" step="0.1" min="0" max="20" style="width:50px">m/s²</div>
+    <input type="range" id="gSlider" min="0" max="20" value="9.8" step="0.1">
+    <div class="val-row">方向 <input type="number" id="gDir" value="270" step="1" min="0" max="359" style="width:50px">°</div>
+    <div class="val-row">恢复 <input type="number" id="restitution" value="0.6" step="0.05" min="0" max="1" style="width:50px"></div>
+    <div class="val-row">速度 <input type="number" id="simSpeed" value="1" step="0.5" min="0.1" max="5" style="width:50px">x</div>
+    <label style="display:flex;align-items:center;gap:4px;font-size:10px;color:#889">
+      <input type="checkbox" id="showForces" checked> 力矢量
+    </label>
+    <label style="display:flex;align-items:center;gap:4px;font-size:10px;color:#889">
+      <input type="checkbox" id="showVelocity" checked> 速度矢量
+    </label>
+  </div>
+
+  <!-- Canvas -->
+  <div class="canvas-wrap">
+    <canvas id="canvas"></canvas>
+    <div class="zoom-info" id="zoomInfo">地面: y=450</div>
+  </div>
+
+  <!-- Property panel -->
+  <div class="props" id="propsPanel">
+    <h3>选中物体</h3>
+    <p id="noSelect" style="font-size:11px;color:#667">点击物体查看属性<br>右键: 固定/删除</p>
+    <div id="propContent" style="display:none"></div>
+    <div class="sep"></div>
+    <label>受力和运动</label>
+    <div class="force-line" id="forceLines">选中物体查看</div>
+    <div class="sep"></div>
+    <label>系统</label>
+    <div class="force-line" id="sysEnergy">动能: ---<br>势能: ---<br>总机械能: ---</div>
+  </div>
+</div>
+
+<!-- Bottom controls -->
+<div style="position:fixed;bottom:12px;left:50%;transform:translateX(-50%);display:flex;gap:10px;align-items:center;background:#12121a;padding:8px 16px;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.5)">
+  <button id="btnPlay" class="playing" style="padding:6px 16px;background:#e94560;border:1px solid #e94560;border-radius:5px;color:#fff;cursor:pointer;font-size:12px">⏸ 暂停</button>
+  <button id="btnStep" style="padding:6px 12px;border:1px solid #2a2a3a;border-radius:5px;background:#1a1a2e;color:#ccc;cursor:pointer;font-size:12px">⏭ 单步</button>
+  <button id="btnReset" style="padding:6px 12px;border:1px solid #2a2a3a;border-radius:5px;background:#1a1a2e;color:#ccc;cursor:pointer;font-size:12px">🔄 重置</button>
+  <span style="font-size:10px;color:#555">空格=播放/暂停 →=单步</span>
+</div>
+
+<div class="ctx-menu" id="ctxMenu"></div>
+
+<script>
+// ============ VEC2 HELPERS ============
+function v2(x,y) { return {x,y}; }
+function vadd(a,b) { return v2(a.x+b.x, a.y+b.y); }
+function vsub(a,b) { return v2(a.x-b.x, a.y-b.y); }
+function vmul(v,s) { return v2(v.x*s, v.y*s); }
+function vdot(a,b) { return a.x*b.x + a.y*b.y; }
+function vcross(a,b) { return a.x*b.y - a.y*b.x; }
+function vlen(v) { return Math.sqrt(vdot(v,v)); }
+function vnorm(v) { const l=vlen(v); return l>0.0001 ? v2(v.x/l, v.y/l) : v2(0,0); }
+function vperp(v) { return v2(-v.y, v.x); }
+function vrot(v, angle) { const c=Math.cos(angle), s=Math.sin(angle); return v2(v.x*c - v.y*s, v.x*s + v.y*c); }
+
+// ============ PHYSICS CONSTANTS ============
+const SUBSTEPS = 4;
+const PENETRATION_SLOP = 0.5;
+const POS_CORRECTION = 0.3;
+
+// ============ BODY CLASS ============
+let nextId = 1;
+
+class RigidBody {
+  constructor(shape, x, y, mass) {
+    this.id = nextId++;
+    this.shape = shape; // 'circle' | 'rect' | 'poly'
+    this.pos = v2(x, y);
+    this.vel = v2(0, 0);
+    this.angle = 0;
+    this.angVel = 0;
+    this.force = v2(0, 0);
+    this.torque = 0;
+
+    // Set by each shape factory
+    this.radius = 0;
+    this.w = 0; this.h = 0;
+    this.verts = null; // array of {x,y} in local coords for poly
+    this.worldVerts = null;
+
+    this.mass = mass;
+    this.invMass = mass > 0 ? 1 / mass : 0;
+    this.inertia = 1;
+    this.invInertia = 1;
+
+    this.fixed = false;
+    this.restitution = 0.6;
+
+    // For friction pairing
+    this.frictionId = 'default';
+  }
+
+  setMass(m) {
+    this.mass = m;
+    this.invMass = m > 0 ? 1 / m : 0;
+  }
+
+  setInertia(I) {
+    this.inertia = I;
+    this.invInertia = I > 0 ? 1 / I : 0;
+  }
+
+  computeWorldVerts() {
+    if (!this.verts) return;
+    this.worldVerts = this.verts.map(v => vadd(this.pos, vrot(v, this.angle)));
+  }
+
+  applyForce(f, point) {
+    if (this.fixed) return;
+    this.force = vadd(this.force, f);
+    if (point) {
+      const r = vsub(point, this.pos);
+      this.torque += vcross(r, f);
+    }
+  }
+
+  integrate(dt) {
+    if (this.fixed) { this.force = v2(0,0); this.torque = 0; return; }
+    // Semi-implicit Euler
+    this.vel = vadd(this.vel, vmul(this.force, this.invMass * dt));
+    this.angVel += this.torque * this.invInertia * dt;
+    this.pos = vadd(this.pos, vmul(this.vel, dt));
+    this.angle += this.angVel * dt;
+    if (this.verts) this.computeWorldVerts();
+    this.force = v2(0, 0);
+    this.torque = 0;
+  }
+}
+
+// ============ SHAPE FACTORIES ============
+function createBall(x, y, radius, mass) {
+  const b = new RigidBody('circle', x, y, mass);
+  b.radius = radius;
+  b.setInertia(0.5 * mass * radius * radius);
+  return b;
+}
+
+function createBox(x, y, w, h, mass) {
+  const b = new RigidBody('rect', x, y, mass);
+  b.w = w; b.h = h;
+  b.setInertia(mass * (w*w + h*h) / 12);
+  b.verts = [v2(-w/2,-h/2), v2(w/2,-h/2), v2(w/2,h/2), v2(-w/2,h/2)];
+  b.computeWorldVerts();
+  return b;
+}
+
+function createTriangle(x, y, v1, v2, v3, mass) {
+  // v1, v2, v3 are local offsets from centroid
+  const b = new RigidBody('poly', x, y, mass);
+  b.verts = [v1, v2, v3];
+  // Inertia for triangle polygon
+  // Compute area and then inertia
+  const poly = [v1, v2, v3];
+  let area = 0, I = 0;
+  const n = poly.length;
+  for (let i = 0; i < n; i++) {
+    const p0 = poly[i], p1 = poly[(i+1)%n];
+    area += vcross(p0, p1);
+  }
+  area = Math.abs(area) / 2;
+  // Polygon inertia (approximate)
+  let xx = 0, yy = 0;
+  for (const p of poly) { xx += p.x*p.x; yy += p.y*p.y; }
+  I = mass * (xx + yy) / (3 * n);
+  b.setInertia(Math.max(I, 0.001));
+  b.computeWorldVerts();
+  return b;
+}
+
+function createTriBlock(x, y, base, height, mass) {
+  // Isosceles triangle, tip pointing up
+  const h2 = height * 0.65;
+  const h1 = height * 0.35;
+  return createTriangle(x, y,
+    v2(0, -h2), v2(-base/2, h1), v2(base/2, h1), mass);
+}
+
+// ============ COLLISION DETECTION ============
+function getRectVerts(body) {
+  return body.worldVerts || [
+    vadd(body.pos, vrot(v2(-body.w/2, -body.h/2), body.angle)),
+    vadd(body.pos, vrot(v2( body.w/2, -body.h/2), body.angle)),
+    vadd(body.pos, vrot(v2( body.w/2,  body.h/2), body.angle)),
+    vadd(body.pos, vrot(v2(-body.w/2,  body.h/2), body.angle)),
+  ];
+}
+
+function getAxes(verts) {
+  const axes = [];
+  for (let i = 0; i < verts.length; i++) {
+    const edge = vsub(verts[(i+1)%verts.length], verts[i]);
+    axes.push(vnorm(vperp(edge)));
+  }
+  return axes;
+}
+
+function projectVerts(verts, axis) {
+  let mn = Infinity, mx = -Infinity;
+  for (const v of verts) { const d = vdot(v, axis); if (d < mn) mn = d; if (d > mx) mx = d; }
+  return { min: mn, max: mx };
+}
+
+function projectCircle(center, radius, axis) {
+  const c = vdot(center, axis);
+  return { min: c - radius, max: c + radius };
+}
+
+function SATCollision(a, b) {
+  const av = a.shape === 'circle' ? null : (a.shape === 'rect' ? getRectVerts(a) : a.worldVerts);
+  const bv = b.shape === 'circle' ? null : (b.shape === 'rect' ? getRectVerts(b) : b.worldVerts);
+
+  if (!av && !bv) return circleCircle(a, b);
+  if (!av) return circlePoly(a, bv, b);
+  if (!bv) return circlePoly(b, av, a);
+
+  // SAT
+  let overlap = Infinity, normal = v2(0, 0);
+  const axes = [...getAxes(av), ...getAxes(bv)];
+
+  for (const axis of axes) {
+    const p1 = projectVerts(av, axis), p2 = projectVerts(bv, axis);
+    const o = Math.min(p1.max - p2.min, p2.max - p1.min);
+    if (o <= 0) return null;
+    if (o < overlap) { overlap = o; normal = axis; }
+  }
+
+  // Correct normal direction (from a to b)
+  const d = vsub(b.pos, a.pos);
+  if (vdot(normal, d) < 0) normal = vmul(normal, -1);
+
+  // Find contact point (approximate as midpoint of overlapping ranges)
+  let cx = 0, cy = 0, count = 0;
+  for (const va of av) {
+    for (const vb of bv) {
+      // Check if vertices are in the overlap region
+      const da = vdot(va, normal), db = vdot(vb, normal);
+      if (Math.abs(da - db) < overlap * 1.5) {
+        cx += (va.x + vb.x) / 2;
+        cy += (va.y + vb.y) / 2;
+        count++;
+      }
+    }
+  }
+  if (count === 0) {
+    // Fallback: midpoint of the two centers
+    cx = (a.pos.x + b.pos.x) / 2;
+    cy = (a.pos.y + b.pos.y) / 2;
+  } else {
+    cx /= count; cy /= count;
+  }
+
+  return { normal, depth: overlap, contact: v2(cx, cy) };
+}
+
+function circleCircle(a, b) {
+  const d = vsub(b.pos, a.pos);
+  const dist = vlen(d);
+  const minDist = a.radius + b.radius;
+  if (dist >= minDist) return null;
+  const normal = dist > 0.001 ? vmul(d, 1/dist) : v2(0, -1);
+  return {
+    normal,
+    depth: minDist - dist,
+    contact: vadd(a.pos, vmul(normal, a.radius - (minDist - dist) / 2))
+  };
+}
+
+function circlePoly(circle, polyVerts, polyBody) {
+  let bestDist = -Infinity, bestNormal = v2(0,1), bestPt = v2(0,0);
+
+  // Find closest point on polygon to circle center
+  let minDist = Infinity, closest = v2(0,0);
+  const n = polyVerts.length;
+  for (let i = 0; i < n; i++) {
+    const a = polyVerts[i], b = polyVerts[(i+1)%n];
+    const ab = vsub(b, a);
+    const ac = vsub(circle.pos, a);
+    let t = vdot(ac, ab) / Math.max(vdot(ab, ab), 0.0001);
+    t = Math.max(0, Math.min(1, t));
+    const pt = vadd(a, vmul(ab, t));
+    const dist = vlen(vsub(circle.pos, pt));
+    if (dist < minDist) { minDist = dist; closest = pt; }
+  }
+
+  const d = vsub(circle.pos, closest);
+  const dist = vlen(d);
+  if (dist >= circle.radius && dist > 0.0001) return null;
+
+  if (dist < 0.0001) {
+    // Circle center inside polygon — use polygon normal
+    const polyCenter = polyBody.pos;
+    const out = vsub(circle.pos, polyCenter);
+    return {
+      normal: vlen(out) > 0.001 ? vnorm(out) : v2(0,-1),
+      depth: circle.radius,
+      contact: closest
+    };
+  }
+
+  const normal = vmul(d, 1 / dist);
+  return {
+    normal,
+    depth: circle.radius - dist,
+    contact: closest
+  };
+}
+
+// ============ FRICTION PAIRS ============
+// key: "idSmaller-idLarger" → { mu_s, mu_k }
+const frictionPairs = new Map();
+const DEFAULT_FRICTION = { mu_s: 0.5, mu_k: 0.3 };
+
+function getFrictionPairKey(a, b) {
+  return a.id < b.id ? `${a.id}-${b.id}` : `${b.id}-${a.id}`;
+}
+
+function getFriction(a, b) {
+  return frictionPairs.get(getFrictionPairKey(a, b)) || DEFAULT_FRICTION;
+}
+
+// ============ PHYSICS WORLD ============
+const bodies = [];
+const springs = [];
+const ropes = [];
+let gravity = 9.8;
+let gravDir = 270; // degrees, 270 = downward
+let restitution = 0.6;
+
+function gravityVector() {
+  const rad = gravDir * Math.PI / 180;
+  return v2(Math.cos(rad) * gravity, Math.sin(rad) * gravity);
+}
+
+function simulate(dt) {
+  const subDt = dt / SUBSTEPS;
+
+  for (let s = 0; s < SUBSTEPS; s++) {
+    // Apply gravity
+    const gv = gravityVector();
+    for (const b of bodies) {
+      if (!b.fixed) b.force = vadd(b.force, vmul(gv, b.mass));
+    }
+
+    // Apply spring forces
+    for (const sp of springs) {
+      const d = vsub(sp.b2.pos, sp.b1.pos);
+      const dist = vlen(d);
+      if (dist < 0.0001) continue;
+      const dir = vmul(d, 1 / dist);
+      const force = sp.k * (dist - sp.restLen);
+      sp.b1.applyForce(vmul(dir, force));
+      sp.b2.applyForce(vmul(dir, -force));
+    }
+
+    // Apply rope constraints
+    for (const rp of ropes) {
+      const d = vsub(rp.b2.pos, rp.b1.pos);
+      const dist = vlen(d);
+      if (dist <= rp.maxLen || dist < 0.0001) continue;
+      const dir = vmul(d, 1 / dist);
+      const correction = dist - rp.maxLen;
+      const stiffness = 0.8;
+      const totalInvMass = rp.b1.invMass + rp.b2.invMass;
+      if (totalInvMass < 0.0001) continue;
+      const impulse = correction * stiffness / (totalInvMass * SUBSTEPS);
+      if (!rp.b1.fixed) rp.b1.vel = vadd(rp.b1.vel, vmul(dir, impulse * rp.b1.invMass));
+      if (!rp.b2.fixed) rp.b2.vel = vadd(rp.b2.vel, vmul(dir, -impulse * rp.b2.invMass));
+    }
+
+    // Integrate
+    for (const b of bodies) b.integrate(subDt);
+
+    // Collision detection + response
+    const collisions = [];
+    for (let i = 0; i < bodies.length; i++) {
+      for (let j = i + 1; j < bodies.length; j++) {
+        const hit = SATCollision(bodies[i], bodies[j]);
+        if (hit) {
+          hit.a = bodies[i]; hit.b = bodies[j];
+          collisions.push(hit);
+        }
+      }
+    }
+
+    // Ground collision
+    const groundY = 450;
+    for (const b of bodies) {
+      if (b.fixed) continue;
+      if (b.shape === 'circle') {
+        if (b.pos.y + b.radius > groundY) {
+          const depth = b.pos.y + b.radius - groundY;
+          b.pos.y -= depth;
+          b.vel.y = Math.min(b.vel.y, 0) * -restitution * 0.5;
+          b.vel.x *= (1 - 0.3 * subDt * 60); // ground friction
+        }
+      } else if (b.shape === 'rect' || b.shape === 'poly') {
+        const verts = b.worldVerts;
+        let lowestY = -Infinity;
+        for (const v of verts) if (v.y > lowestY) lowestY = v.y;
+        if (lowestY > groundY) {
+          const depth = lowestY - groundY;
+          b.pos.y -= depth;
+          b.vel.y = Math.min(b.vel.y, 0) * -restitution * 0.5;
+          b.vel.x *= (1 - 0.3 * subDt * 60);
+        }
+      }
+    }
+
+    // Resolve collisions
+    for (const hit of collisions) {
+      const a = hit.a, b = hit.b;
+      const friction = getFriction(a, b);
+      const e = Math.min(a.restitution, b.restitution);
+
+      const rA = vsub(hit.contact, a.pos);
+      const rB = vsub(hit.contact, b.pos);
+      const vA = vadd(a.vel, vmul(vperp(rA), a.angVel));
+      const vB = vadd(b.vel, vmul(vperp(rB), b.angVel));
+      const vRel = vsub(vB, vA);
+      const vn = vdot(vRel, hit.normal);
+
+      if (vn > 0) continue; // separating
+
+      // Normal impulse
+      const rAxN = vcross(rA, hit.normal);
+      const rBxN = vcross(rB, hit.normal);
+      const invMassSum = a.invMass + b.invMass + rAxN*rAxN*a.invInertia + rBxN*rBxN*b.invInertia;
+      let jn = -(1 + e) * vn / Math.max(invMassSum, 0.0001);
+      jn = Math.max(0, jn);
+
+      const impulseN = vmul(hit.normal, jn);
+      if (!a.fixed) {
+        a.vel = vadd(a.vel, vmul(impulseN, -a.invMass));
+        a.angVel -= vcross(rA, impulseN) * a.invInertia;
+      }
+      if (!b.fixed) {
+        b.vel = vadd(b.vel, vmul(impulseN, b.invMass));
+        b.angVel += vcross(rB, impulseN) * b.invInertia;
+      }
+
+      // Friction impulse
+      const vRelAfter = vsub(vadd(b.vel, vmul(vperp(rB), b.angVel)), vadd(a.vel, vmul(vperp(rA), a.angVel)));
+      const tangent = vnorm(vsub(vRelAfter, vmul(hit.normal, vdot(vRelAfter, hit.normal))));
+      const vt = vdot(vRelAfter, tangent);
+
+      const rAxT = vcross(rA, tangent);
+      const rBxT = vcross(rB, tangent);
+      const invMassSumT = a.invMass + b.invMass + rAxT*rAxT*a.invInertia + rBxT*rBxT*b.invInertia;
+      let jt = -vt / Math.max(invMassSumT, 0.0001);
+
+      // Coulomb friction cap
+      jt = Math.max(-friction.mu_k * jn, Math.min(friction.mu_k * jn, jt));
+
+      const impulseT = vmul(tangent, jt);
+      if (!a.fixed) {
+        a.vel = vadd(a.vel, vmul(impulseT, -a.invMass));
+        a.angVel -= vcross(rA, impulseT) * a.invInertia;
+      }
+      if (!b.fixed) {
+        b.vel = vadd(b.vel, vmul(impulseT, b.invMass));
+        b.angVel += vcross(rB, impulseT) * b.invInertia;
+      }
+
+      // Position correction
+      if (hit.depth > PENETRATION_SLOP) {
+        const correction = Math.max(hit.depth - PENETRATION_SLOP, 0) * POS_CORRECTION / Math.max(invMassSum, 0.0001);
+        const corrV = vmul(hit.normal, correction);
+        if (!a.fixed) a.pos = vadd(a.pos, vmul(corrV, -a.invMass));
+        if (!b.fixed) b.pos = vadd(b.pos, vmul(corrV, b.invMass));
+        if (a.verts) a.computeWorldVerts();
+        if (b.verts) b.computeWorldVerts();
+      }
+    }
+  }
+}
+
+// ============ RENDERING ============
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const W = 900, H = 520;
+
+function resizeCanvas() {
+  const wrap = canvas.parentElement;
+  canvas.width = W;
+  canvas.height = H;
+}
+resizeCanvas();
+
+function drawBody(b) {
+  ctx.save();
+  ctx.translate(b.pos.x, b.pos.y);
+  ctx.rotate(b.angle);
+
+  if (b.fixed) {
+    ctx.strokeStyle = '#e94560';
+    ctx.lineWidth = 2.5;
+  } else {
+    ctx.strokeStyle = '#aaa';
+    ctx.lineWidth = 1.5;
+  }
+  ctx.fillStyle = b === selectedBody ? 'rgba(78,205,196,0.25)' : 'rgba(255,255,255,0.08)';
+
+  if (b.shape === 'circle') {
+    ctx.beginPath();
+    ctx.arc(0, 0, b.radius, 0, Math.PI*2);
+    ctx.fill(); ctx.stroke();
+    // Orientation mark
+    ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(b.radius, 0);
+    ctx.strokeStyle = '#888'; ctx.lineWidth = 1; ctx.stroke();
+  } else if (b.shape === 'rect') {
+    ctx.fillRect(-b.w/2, -b.h/2, b.w, b.h);
+    ctx.strokeRect(-b.w/2, -b.h/2, b.w, b.h);
+  } else if (b.shape === 'poly' && b.verts) {
+    ctx.beginPath();
+    ctx.moveTo(b.verts[0].x, b.verts[0].y);
+    for (let i = 1; i < b.verts.length; i++) ctx.lineTo(b.verts[i].x, b.verts[i].y);
+    ctx.closePath();
+    ctx.fill(); ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+const ARROW_SCALE = 40; // pixels per 100N
+
+function drawArrow(from, to, color, width) {
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineWidth = width || 1.5;
+  const d = vsub(to, from);
+  const len = vlen(d);
+  if (len < 0.5) return;
+  const dir = vmul(d, 1/len);
+  const tip = vadd(from, d);
+  // Arrowhead
+  const headSize = Math.min(len * 0.3, 8);
+  ctx.beginPath();
+  ctx.moveTo(from.x, from.y);
+  ctx.lineTo(tip.x, tip.y);
+  ctx.stroke();
+  // Triangle head
+  ctx.beginPath();
+  ctx.moveTo(tip.x, tip.y);
+  ctx.lineTo(tip.x - dir.x*headSize + dir.y*headSize*0.5, tip.y - dir.y*headSize - dir.x*headSize*0.5);
+  ctx.lineTo(tip.x - dir.x*headSize - dir.y*headSize*0.5, tip.y - dir.y*headSize + dir.x*headSize*0.5);
+  ctx.closePath();
+  ctx.fill();
+}
+
+function render() {
+  ctx.clearRect(0, 0, W, H);
+
+  // Background grid
+  ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+  ctx.lineWidth = 0.5;
+  for (let x = 0; x < W; x += 50) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
+  for (let y = 0; y < H; y += 50) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
+
+  // Ground line
+  ctx.strokeStyle = '#444';
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(0, 450); ctx.lineTo(W, 450); ctx.stroke();
+  // Ground fill
+  ctx.fillStyle = 'rgba(255,255,255,0.02)';
+  ctx.fillRect(0, 450, W, H - 450);
+
+  // Draw springs
+  for (const sp of springs) {
+    ctx.strokeStyle = '#e67e22';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath(); ctx.moveTo(sp.b1.pos.x, sp.b1.pos.y); ctx.lineTo(sp.b2.pos.x, sp.b2.pos.y); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // Draw ropes
+  for (const rp of ropes) {
+    ctx.strokeStyle = '#8e44ad';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([8, 4]);
+    ctx.beginPath(); ctx.moveTo(rp.b1.pos.x, rp.b1.pos.y); ctx.lineTo(rp.b2.pos.x, rp.b2.pos.y); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // Draw bodies
+  for (const b of bodies) drawBody(b);
+
+  // Force arrows (on selected body)
+  const showForces = document.getElementById('showForces').checked;
+  const showVelo = document.getElementById('showVelocity').checked;
+
+  if (showForces && selectedBody) {
+    const b = selectedBody;
+    const gv = gravityVector();
+    const fg = vmul(gv, b.mass); // gravity force
+    const scale = ARROW_SCALE / 100; // pixels per newton
+    drawArrow(b.pos, vadd(b.pos, vmul(fg, scale)), '#4ecdc4', 2); // gravity — cyan
+  }
+
+  if (showVelo) {
+    for (const b of bodies) {
+      if (b.fixed) continue;
+      const v = b.vel;
+      const len = vlen(v);
+      if (len < 0.1) continue;
+      drawArrow(b.pos, vadd(b.pos, vmul(v, 0.5)), '#e67e22', 1); // velocity — orange
+    }
+  }
+
+  // Friction pair indicator
+  if (frictionTarget) {
+    ctx.strokeStyle = '#e67e22';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 3]);
+    ctx.beginPath(); ctx.arc(frictionTarget.pos.x, frictionTarget.pos.y, 20, 0, Math.PI*2); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+}
+
+// ============ UI STATE ============
+let selectedBody = null;
+let currentTool = 'ball';
+let frictionTarget = null;
+let frictionStep = 0; // 0=idle, 1=selected first
+let playing = true;
+let dragging = false;
+let dragBody = null;
+let dragOffset = v2(0,0);
+let simSpeed = 1;
+
+// ============ PROPERTY PANEL ============
+function updateProps() {
+  const noSel = document.getElementById('noSelect');
+  const content = document.getElementById('propContent');
+  if (!selectedBody) {
+    noSel.style.display = 'block';
+    content.style.display = 'none';
+    document.getElementById('forceLines').innerHTML = '选中物体查看';
+    return;
+  }
+  noSel.style.display = 'none';
+  content.style.display = 'block';
+
+  const b = selectedBody;
+  content.innerHTML = `
+    <div class="val-row">ID <span class="kv">#${b.id}</span></div>
+    <div class="val-row">形状 <span class="kv">${b.shape==='circle'?'球':b.shape==='rect'?'方块':'三角'}</span></div>
+    <div class="val-row">质量 <input type="number" id="propMass" value="${b.mass.toFixed(2)}" step="0.1" min="0.01" style="width:55px"> kg</div>
+    <div class="val-row">恢复 <input type="number" id="propRest" value="${b.restitution.toFixed(2)}" step="0.05" min="0" max="1" style="width:55px"></div>
+    <div class="val-row">固定 <input type="checkbox" id="propFixed" ${b.fixed?'checked':''}></div>
+    ${b.shape==='circle' ? `<div class="val-row">半径 <input type="number" id="propR" value="${b.radius}" step="1" min="2" max="60" style="width:55px"> px</div>` : ''}
+    ${b.shape==='rect' ? `<div class="val-row">宽 <input type="number" id="propW" value="${b.w}" step="1" min="5" max="200" style="width:50px"> 高 <input type="number" id="propH" value="${b.h}" step="1" min="5" max="200" style="width:50px"> px</div>` : ''}
+    <button id="btnDelete" style="padding:4px 10px;background:#5c1a1a;border:1px solid #8b2020;border-radius:4px;color:#ccc;cursor:pointer;font-size:11px">删除</button>
+  `;
+
+  document.getElementById('propMass').oninput = function() {
+    const m = parseFloat(this.value) || 1;
+    b.setMass(Math.max(0.01, m));
+    if (b.shape === 'circle') b.setInertia(0.5 * b.mass * b.radius * b.radius);
+    else if (b.shape === 'rect') b.setInertia(b.mass * (b.w*b.w + b.h*b.h) / 12);
+  };
+  document.getElementById('propRest').oninput = function() {
+    b.restitution = parseFloat(this.value) || 0;
+  };
+  document.getElementById('propFixed').onchange = function() {
+    b.fixed = this.checked;
+  };
+  if (b.shape === 'circle') {
+    document.getElementById('propR').oninput = function() {
+      b.radius = Math.max(2, parseInt(this.value) || 10);
+      b.setInertia(0.5 * b.mass * b.radius * b.radius);
+    };
+  }
+  if (b.shape === 'rect') {
+    document.getElementById('propW').oninput = function() {
+      b.w = Math.max(5, parseInt(this.value) || 20);
+      b.setInertia(b.mass * (b.w*b.w + b.h*b.h) / 12);
+      b.verts = [v2(-b.w/2,-b.h/2), v2(b.w/2,-b.h/2), v2(b.w/2,b.h/2), v2(-b.w/2,b.h/2)];
+      b.computeWorldVerts();
+    };
+    document.getElementById('propH').oninput = function() {
+      b.h = Math.max(5, parseInt(this.value) || 20);
+      b.setInertia(b.mass * (b.w*b.w + b.h*b.h) / 12);
+      b.verts = [v2(-b.w/2,-b.h/2), v2(b.w/2,-b.h/2), v2(b.w/2,b.h/2), v2(-b.w/2,b.h/2)];
+      b.computeWorldVerts();
+    };
+  }
+  document.getElementById('btnDelete').onclick = () => {
+    const idx = bodies.indexOf(b);
+    if (idx >= 0) bodies.splice(idx, 1);
+    // Remove related constraints
+    for (let i = springs.length-1; i >= 0; i--) if (springs[i].b1===b || springs[i].b2===b) springs.splice(i,1);
+    for (let i = ropes.length-1; i >= 0; i--) if (ropes[i].b1===b || ropes[i].b2===b) ropes.splice(i,1);
+    // Remove friction pairs
+    for (const [key] of frictionPairs) if (key.includes(String(b.id))) frictionPairs.delete(key);
+    if (selectedBody === b) selectedBody = null;
+    if (frictionTarget === b) { frictionTarget = null; frictionStep = 0; }
+    updateProps();
+  };
+
+  // Force analysis
+  updateForceLines();
+}
+
+function updateForceLines() {
+  const el = document.getElementById('forceLines');
+  if (!selectedBody) { el.innerHTML = '选中物体查看'; return; }
+  const b = selectedBody;
+  const gv = gravityVector();
+  const fg = vmul(gv, b.mass);
+  const fgN = vlen(fg);
+
+  let lines = `<span class="fg">重力: ${fgN.toFixed(1)} N ↓</span><br>`;
+  lines += `速度: ${vlen(b.vel).toFixed(2)} m/s<br>`;
+  lines += `角速度: ${(b.angVel*180/Math.PI).toFixed(1)} °/s<br>`;
+  lines += `动能: ${(0.5*b.mass*vlen(b.vel)*vlen(b.vel)).toFixed(2)} J<br>`;
+  lines += `势能: ${(b.mass*gravity*(H-b.pos.y)/100).toFixed(2)} J`;
+
+  el.innerHTML = lines;
+
+  // System energy
+  let ke = 0, pe = 0;
+  for (const bo of bodies) {
+    ke += 0.5 * bo.mass * vlen(bo.vel) * vlen(bo.vel);
+    pe += bo.mass * gravity * (H - bo.pos.y) / 100;
+  }
+  document.getElementById('sysEnergy').innerHTML =
+    `动能: ${ke.toFixed(2)} J<br>势能: ${pe.toFixed(2)} J<br>总机械能: ${(ke+pe).toFixed(2)} J`;
+}
+
+// ============ CANVAS INTERACTION ============
+function getWorldPos(e) {
+  const rect = canvas.getBoundingClientRect();
+  return v2(e.clientX - rect.left, e.clientY - rect.top);
+}
+
+function hitTest(pos) {
+  // Reverse order: topmost first
+  for (let i = bodies.length - 1; i >= 0; i--) {
+    const b = bodies[i];
+    if (b.shape === 'circle') {
+      if (vlen(vsub(pos, b.pos)) <= b.radius + 2) return b;
+    } else if (b.shape === 'rect') {
+      const local = vrot(vsub(pos, b.pos), -b.angle);
+      if (Math.abs(local.x) <= b.w/2 + 2 && Math.abs(local.y) <= b.h/2 + 2) return b;
+    } else if (b.shape === 'poly' && b.worldVerts) {
+      // Point-in-polygon
+      let inside = false;
+      const v = b.worldVerts;
+      for (let i=0, j=v.length-1; i<v.length; j=i++) {
+        if ((v[i].y>pos.y)!==(v[j].y>pos.y) && pos.x<(v[j].x-v[i].x)*(pos.y-v[i].y)/(v[j].y-v[i].y)+v[i].x)
+          inside = !inside;
+      }
+      if (inside) return b;
+    }
+  }
+  return null;
+}
+
+canvas.addEventListener('mousedown', e => {
+  if (e.button === 2) { // Right click
+    e.preventDefault();
+    const pos = getWorldPos(e);
+    const hit = hitTest(pos);
+    showCtxMenu(e.clientX, e.clientY, hit);
+    return;
+  }
+  if (e.button !== 0) return;
+
+  const pos = getWorldPos(e);
+  const hit = hitTest(pos);
+
+  // Friction pairing mode
+  if (currentTool === 'friction') {
+    if (hit) {
+      if (frictionStep === 0) {
+        frictionTarget = hit;
+        frictionStep = 1;
+      } else if (frictionStep === 1 && hit !== frictionTarget) {
+        const key = getFrictionPairKey(frictionTarget, hit);
+        const existing = frictionPairs.get(key) || DEFAULT_FRICTION;
+        const mu_s = parseFloat(prompt(`设置 ${frictionTarget.id}-${hit.id} 静摩擦系数 μ_s:`, existing.mu_s));
+        const mu_k = parseFloat(prompt(`设置 ${frictionTarget.id}-${hit.id} 滑动摩擦系数 μ_k:`, existing.mu_k));
+        if (!isNaN(mu_s) && !isNaN(mu_k)) {
+          frictionPairs.set(key, { mu_s, mu_k });
+        }
+        frictionTarget = null;
+        frictionStep = 0;
+        document.getElementById('btnFriction').classList.remove('active');
+        currentTool = 'ball';
+        updateToolBtns();
+      }
+    }
+    return;
+  }
+
+  // Spring tool: click first body, then second
+  if (currentTool === 'spring') {
+    if (hit && !springTarget) {
+      springTarget = hit;
+    } else if (hit && springTarget && hit !== springTarget) {
+      const k = parseFloat(prompt('劲度系数 k (N/m):', '200')) || 200;
+      const d = vlen(vsub(hit.pos, springTarget.pos));
+      springs.push({ b1: springTarget, b2: hit, k, restLen: d });
+      springTarget = null;
+    }
+    return;
+  }
+
+  // Rope tool: click first body, then second
+  if (currentTool === 'rope') {
+    if (hit && !ropeTarget) {
+      ropeTarget = hit;
+    } else if (hit && ropeTarget && hit !== ropeTarget) {
+      const maxLen = parseFloat(prompt('绳索最大长度 (px):', Math.round(vlen(vsub(hit.pos, ropeTarget.pos))).toString())) || 150;
+      ropes.push({ b1: ropeTarget, b2: hit, maxLen });
+      ropeTarget = null;
+    }
+    return;
+  }
+
+  // Drag body
+  if (hit && !playing) {
+    dragBody = hit;
+    dragOffset = vsub(hit.pos, pos);
+    dragging = true;
+    selectedBody = hit;
+    updateProps();
+    updateToolBtns();
+  } else if (!hit && !playing) {
+    selectedBody = null;
+    updateProps();
+    updateToolBtns();
+  }
+
+  // Place new body
+  if (!hit && currentTool !== 'spring' && currentTool !== 'rope' && currentTool !== 'friction') {
+    placeBody(pos);
+  }
+});
+
+canvas.addEventListener('mousemove', e => {
+  const pos = getWorldPos(e);
+  if (dragging && dragBody && !playing) {
+    dragBody.pos = vadd(pos, dragOffset);
+    if (dragBody.verts) dragBody.computeWorldVerts();
+    dragBody.vel = v2(0, 0);
+    dragBody.angVel = 0;
+  }
+});
+
+canvas.addEventListener('mouseup', () => { dragging = false; dragBody = null; });
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+function placeBody(pos) {
+  let body;
+  switch (currentTool) {
+    case 'ball':
+      body = createBall(pos.x, pos.y, 15, 1);
+      break;
+    case 'box':
+      body = createBox(pos.x, pos.y, 30, 30, 2);
+      break;
+    case 'tri':
+      body = createTriBlock(pos.x, pos.y, 40, 40, 1.5);
+      break;
+    default: return;
+  }
+  bodies.push(body);
+  selectedBody = body;
+  updateProps();
+}
+
+let springTarget = null;
+let ropeTarget = null;
+
+// ============ CONTEXT MENU ============
+function showCtxMenu(mx, my, body) {
+  const menu = document.getElementById('ctxMenu');
+  menu.innerHTML = '';
+  menu.style.display = 'block';
+  menu.style.left = mx + 'px';
+  menu.style.top = my + 'px';
+
+  if (body) {
+    selectedBody = body;
+    updateProps();
+
+    const fixBtn = document.createElement('button');
+    fixBtn.textContent = body.fixed ? '🔓 释放' : '📌 固定';
+    fixBtn.onclick = () => { body.fixed = !body.fixed; updateProps(); hideCtx(); };
+    menu.appendChild(fixBtn);
+
+    const delBtn = document.createElement('button');
+    delBtn.textContent = '🗑 删除';
+    delBtn.onclick = () => {
+      const idx = bodies.indexOf(body);
+      if (idx >= 0) bodies.splice(idx, 1);
+      for (let i=springs.length-1;i>=0;i--) if (springs[i].b1===body||springs[i].b2===body) springs.splice(i,1);
+      for (let i=ropes.length-1;i>=0;i--) if (ropes[i].b1===body||ropes[i].b2===body) ropes.splice(i,1);
+      for (const [key] of frictionPairs) if (key.includes(String(body.id))) frictionPairs.delete(key);
+      if (selectedBody===body) selectedBody=null;
+      if (frictionTarget===body) {frictionTarget=null;frictionStep=0;}
+      updateProps(); hideCtx();
+    };
+    menu.appendChild(delBtn);
+  } else {
+    const info = document.createElement('button');
+    info.textContent = '在此放置物体';
+    info.onclick = () => { placeBody(v2(mx, my)); hideCtx(); };
+    menu.appendChild(info);
+  }
+}
+function hideCtx() { document.getElementById('ctxMenu').style.display = 'none'; }
+document.addEventListener('click', e => {
+  if (!e.target.closest('#ctxMenu')) hideCtx();
+});
+
+// ============ TOOL BAR ============
+function updateToolBtns() {
+  document.querySelectorAll('[data-tool]').forEach(b => {
+    b.classList.toggle('active', b.dataset.tool === currentTool);
+  });
+}
+
+document.querySelectorAll('[data-tool]').forEach(btn => {
+  btn.onclick = () => {
+    currentTool = btn.dataset.tool;
+    updateToolBtns();
+    springTarget = null; ropeTarget = null;
+    frictionTarget = null; frictionStep = 0;
+    document.getElementById('btnFriction').classList.remove('active');
+  };
+});
+
+document.getElementById('btnFriction').onclick = function() {
+  if (this.classList.contains('active')) {
+    this.classList.remove('active');
+    currentTool = 'ball';
+    frictionTarget = null; frictionStep = 0;
+    updateToolBtns();
+  } else {
+    this.classList.add('active');
+    currentTool = 'friction';
+    frictionTarget = null; frictionStep = 0;
+    document.querySelectorAll('[data-tool]').forEach(b => b.classList.remove('active'));
+  }
+};
+
+// ============ GLOBAL CONTROLS ============
+document.getElementById('gSlider').oninput = function() {
+  gravity = parseFloat(this.value);
+  document.getElementById('gVal').value = gravity;
+};
+document.getElementById('gVal').onchange = function() {
+  gravity = Math.max(0, Math.min(20, parseFloat(this.value) || 9.8));
+  document.getElementById('gSlider').value = gravity;
+};
+document.getElementById('gDir').onchange = function() {
+  gravDir = parseInt(this.value) % 360;
+};
+document.getElementById('restitution').onchange = function() {
+  restitution = parseFloat(this.value) || 0.6;
+};
+document.getElementById('simSpeed').onchange = function() {
+  simSpeed = Math.max(0.1, Math.min(5, parseFloat(this.value) || 1));
+};
+
+document.getElementById('btnPlay').onclick = function() {
+  playing = !playing;
+  this.textContent = playing ? '⏸ 暂停' : '▶ 运行';
+  this.classList.toggle('playing', playing);
+};
+document.getElementById('btnStep').onclick = () => {
+  playing = false;
+  document.getElementById('btnPlay').textContent = '▶ 运行';
+  document.getElementById('btnPlay').classList.remove('playing');
+  simulate(1/60);
+  updateForceLines();
+};
+document.getElementById('btnReset').onclick = () => {
+  bodies.length = 0;
+  springs.length = 0;
+  ropes.length = 0;
+  frictionPairs.clear();
+  selectedBody = null;
+  frictionTarget = null; frictionStep = 0;
+  springTarget = null; ropeTarget = null;
+  updateProps();
+  // Add some demo bodies
+  const b1 = createBox(250, 400, 40, 40, 3);
+  bodies.push(b1);
+  const b2 = createBall(500, 200, 15, 1);
+  b2.vel = v2(-80, -60);
+  bodies.push(b2);
+  const ground = createBox(400, 465, 700, 30, 10000);
+  ground.fixed = true;
+  bodies.push(ground);
+};
+
+// ============ KEYBOARD ============
+document.addEventListener('keydown', e => {
+  if (e.key === ' ' && !e.target.closest('input')) {
+    e.preventDefault();
+    document.getElementById('btnPlay').click();
+  }
+  if (e.key === 'ArrowRight' && !e.target.closest('input')) {
+    e.preventDefault();
+    document.getElementById('btnStep').click();
+  }
+});
+
+// ============ INIT & LOOP ============
+document.getElementById('btnReset').click();
+
+let lastTime = performance.now();
+function loop(now) {
+  const rawDt = (now - lastTime) / 1000;
+  lastTime = now;
+
+  if (playing) {
+    const dt = Math.min(rawDt, 0.05) * simSpeed; // cap at 50ms to avoid spiral
+    simulate(dt);
+    if (selectedBody) updateForceLines();
+    else {
+      let ke=0, pe=0;
+      for (const b of bodies) { ke+=0.5*b.mass*vlen(b.vel)**2; pe+=b.mass*gravity*(H-b.pos.y)/100; }
+      document.getElementById('sysEnergy').innerHTML = `动能: ${ke.toFixed(2)} J<br>势能: ${pe.toFixed(2)} J<br>总机械能: ${(ke+pe).toFixed(2)} J`;
+    }
+  }
+  render();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
