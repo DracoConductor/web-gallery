@@ -39,7 +39,7 @@ body {
   border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.4);
   overflow: hidden;
 }
-canvas { display: block; cursor: crosshair; }
+canvas { display: block; cursor: crosshair; width: 100%; height: 100%; }
 .zoom-info {
   position: absolute; bottom: 6px; right: 10px;
   font-size: 10px; color: #555;
@@ -112,7 +112,8 @@ canvas { display: block; cursor: crosshair; }
     <input type="range" id="gSlider" min="0" max="20" value="9.8" step="0.1">
     <div class="val-row">方向 <input type="number" id="gDir" value="270" step="1" min="0" max="359" style="width:50px">°</div>
     <div class="val-row">恢复 <input type="number" id="restitution" value="0.6" step="0.05" min="0" max="1" style="width:50px"></div>
-    <div class="val-row">速度 <input type="number" id="simSpeed" value="1" step="0.5" min="0.1" max="5" style="width:50px">x</div>
+    <div class="val-row">速度 <span id="speedLabel" style="color:#4ecdc4;font-family:Consolas,monospace">1x</span></div>
+    <input type="range" id="speedSlider" min="0.1" max="5" value="1" step="0.1">
     <label style="display:flex;align-items:center;gap:4px;font-size:10px;color:#889">
       <input type="checkbox" id="showForces" checked> 力矢量
     </label>
@@ -588,14 +589,17 @@ function simulate(dt) {
 // ============ RENDERING ============
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
-const W = 900, H = 520;
+let W, H;
 
 function resizeCanvas() {
   const wrap = canvas.parentElement;
+  W = wrap.clientWidth;
+  H = wrap.clientHeight;
   canvas.width = W;
   canvas.height = H;
 }
 resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
 
 function drawBody(b) {
   ctx.save();
@@ -661,25 +665,39 @@ function drawArrow(from, to, color, width) {
 function render() {
   ctx.clearRect(0, 0, W, H);
 
+  ctx.save();
+  ctx.translate(viewOffset.x, viewOffset.y);
+  ctx.scale(viewScale, viewScale);
+
+  // World bounds for grid (in world coords)
+  const wx0 = -viewOffset.x / viewScale;
+  const wy0 = -viewOffset.y / viewScale;
+  const wx1 = (W - viewOffset.x) / viewScale;
+  const wy1 = (H - viewOffset.y) / viewScale;
+
   // Background grid
   ctx.strokeStyle = 'rgba(255,255,255,0.03)';
-  ctx.lineWidth = 0.5;
-  for (let x = 0; x < W; x += 50) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
-  for (let y = 0; y < H; y += 50) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
+  ctx.lineWidth = 0.5 / viewScale;
+  const gs = 50;
+  const gx0 = Math.floor(wx0 / gs) * gs;
+  const gy0 = Math.floor(wy0 / gs) * gs;
+  for (let x = gx0; x <= wx1; x += gs) { ctx.beginPath(); ctx.moveTo(x, wy0); ctx.lineTo(x, wy1); ctx.stroke(); }
+  for (let y = gy0; y <= wy1; y += gs) { ctx.beginPath(); ctx.moveTo(wx0, y); ctx.lineTo(wx1, y); ctx.stroke(); }
 
   // Ground line
+  const groundY = 450;
   ctx.strokeStyle = '#444';
-  ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.moveTo(0, 450); ctx.lineTo(W, 450); ctx.stroke();
+  ctx.lineWidth = 2 / viewScale;
+  ctx.beginPath(); ctx.moveTo(wx0, groundY); ctx.lineTo(wx1, groundY); ctx.stroke();
   // Ground fill
   ctx.fillStyle = 'rgba(255,255,255,0.02)';
-  ctx.fillRect(0, 450, W, H - 450);
+  ctx.fillRect(wx0, groundY, wx1 - wx0, wy1 - groundY);
 
   // Draw springs
   for (const sp of springs) {
     ctx.strokeStyle = '#e67e22';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4, 3]);
+    ctx.lineWidth = 1 / viewScale;
+    ctx.setLineDash([4/viewScale, 3/viewScale]);
     ctx.beginPath(); ctx.moveTo(sp.b1.pos.x, sp.b1.pos.y); ctx.lineTo(sp.b2.pos.x, sp.b2.pos.y); ctx.stroke();
     ctx.setLineDash([]);
   }
@@ -687,8 +705,8 @@ function render() {
   // Draw ropes
   for (const rp of ropes) {
     ctx.strokeStyle = '#8e44ad';
-    ctx.lineWidth = 1.5;
-    ctx.setLineDash([8, 4]);
+    ctx.lineWidth = 1.5 / viewScale;
+    ctx.setLineDash([8/viewScale, 4/viewScale]);
     ctx.beginPath(); ctx.moveTo(rp.b1.pos.x, rp.b1.pos.y); ctx.lineTo(rp.b2.pos.x, rp.b2.pos.y); ctx.stroke();
     ctx.setLineDash([]);
   }
@@ -703,9 +721,9 @@ function render() {
   if (showForces && selectedBody) {
     const b = selectedBody;
     const gv = gravityVector();
-    const fg = vmul(gv, b.mass); // gravity force
-    const scale = ARROW_SCALE / 100; // pixels per newton
-    drawArrow(b.pos, vadd(b.pos, vmul(fg, scale)), '#4ecdc4', 2); // gravity — cyan
+    const fg = vmul(gv, b.mass);
+    const scale = ARROW_SCALE / 100;
+    drawArrow(b.pos, vadd(b.pos, vmul(fg, scale)), '#4ecdc4', 2 / viewScale);
   }
 
   if (showVelo) {
@@ -714,18 +732,20 @@ function render() {
       const v = b.vel;
       const len = vlen(v);
       if (len < 0.1) continue;
-      drawArrow(b.pos, vadd(b.pos, vmul(v, 0.5)), '#e67e22', 1); // velocity — orange
+      drawArrow(b.pos, vadd(b.pos, vmul(v, 0.5)), '#e67e22', 1 / viewScale);
     }
   }
 
   // Friction pair indicator
   if (frictionTarget) {
     ctx.strokeStyle = '#e67e22';
-    ctx.lineWidth = 2;
-    ctx.setLineDash([6, 3]);
+    ctx.lineWidth = 2 / viewScale;
+    ctx.setLineDash([6/viewScale, 3/viewScale]);
     ctx.beginPath(); ctx.arc(frictionTarget.pos.x, frictionTarget.pos.y, 20, 0, Math.PI*2); ctx.stroke();
     ctx.setLineDash([]);
   }
+
+  ctx.restore();
 }
 
 // ============ UI STATE ============
@@ -738,6 +758,14 @@ let dragging = false;
 let dragBody = null;
 let dragOffset = v2(0,0);
 let simSpeed = 1;
+let viewScale = 1;
+let viewOffset = v2(0, 0);
+let panning = false;
+let panStart = v2(0, 0);
+
+function screenToWorld(sx, sy) {
+  return v2((sx - viewOffset.x) / viewScale, (sy - viewOffset.y) / viewScale);
+}
 
 // ============ PROPERTY PANEL ============
 function updateProps() {
@@ -842,7 +870,7 @@ function updateForceLines() {
 // ============ CANVAS INTERACTION ============
 function getWorldPos(e) {
   const rect = canvas.getBoundingClientRect();
-  return v2(e.clientX - rect.left, e.clientY - rect.top);
+  return screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
 }
 
 function hitTest(pos) {
@@ -869,11 +897,20 @@ function hitTest(pos) {
 }
 
 canvas.addEventListener('mousedown', e => {
+  // Middle button pan
+  if (e.button === 1) {
+    e.preventDefault();
+    panning = true;
+    panStart = v2(e.clientX - viewOffset.x, e.clientY - viewOffset.y);
+    canvas.style.cursor = 'grabbing';
+    return;
+  }
+
   if (e.button === 2) { // Right click
     e.preventDefault();
     const pos = getWorldPos(e);
     const hit = hitTest(pos);
-    showCtxMenu(e.clientX, e.clientY, hit);
+    showCtxMenu(e.clientX, e.clientY, hit, pos);
     return;
   }
   if (e.button !== 0) return;
@@ -951,6 +988,12 @@ canvas.addEventListener('mousedown', e => {
 });
 
 canvas.addEventListener('mousemove', e => {
+  if (panning) {
+    viewOffset.x = e.clientX - panStart.x;
+    viewOffset.y = e.clientY - panStart.y;
+    updateZoomInfo();
+    return;
+  }
   const pos = getWorldPos(e);
   if (dragging && dragBody && !playing) {
     dragBody.pos = vadd(pos, dragOffset);
@@ -960,8 +1003,29 @@ canvas.addEventListener('mousemove', e => {
   }
 });
 
-canvas.addEventListener('mouseup', () => { dragging = false; dragBody = null; });
+canvas.addEventListener('mouseup', e => {
+  if (e.button === 1) { panning = false; canvas.style.cursor = 'crosshair'; return; }
+  dragging = false; dragBody = null;
+});
 canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  const rect = canvas.getBoundingClientRect();
+  const sx = e.clientX - rect.left;
+  const sy = e.clientY - rect.top;
+  const worldBefore = screenToWorld(sx, sy);
+  const zoom = e.deltaY < 0 ? 1.12 : 0.88;
+  viewScale = Math.max(0.2, Math.min(4, viewScale * zoom));
+  viewOffset.x = sx - worldBefore.x * viewScale;
+  viewOffset.y = sy - worldBefore.y * viewScale;
+  updateZoomInfo();
+}, { passive: false });
+
+function updateZoomInfo() {
+  document.getElementById('zoomInfo').textContent =
+    `缩放 ${(viewScale*100).toFixed(0)}% | 平移 (${-Math.round(viewOffset.x/viewScale)}, ${-Math.round(viewOffset.y/viewScale)})`;
+}
 
 function placeBody(pos) {
   let body;
@@ -986,7 +1050,7 @@ let springTarget = null;
 let ropeTarget = null;
 
 // ============ CONTEXT MENU ============
-function showCtxMenu(mx, my, body) {
+function showCtxMenu(mx, my, body, worldPos) {
   const menu = document.getElementById('ctxMenu');
   menu.innerHTML = '';
   menu.style.display = 'block';
@@ -1015,10 +1079,10 @@ function showCtxMenu(mx, my, body) {
       updateProps(); hideCtx();
     };
     menu.appendChild(delBtn);
-  } else {
+  } else if (worldPos) {
     const info = document.createElement('button');
     info.textContent = '在此放置物体';
-    info.onclick = () => { placeBody(v2(mx, my)); hideCtx(); };
+    info.onclick = () => { placeBody(worldPos); hideCtx(); };
     menu.appendChild(info);
   }
 }
@@ -1073,8 +1137,9 @@ document.getElementById('gDir').onchange = function() {
 document.getElementById('restitution').onchange = function() {
   restitution = parseFloat(this.value) || 0.6;
 };
-document.getElementById('simSpeed').onchange = function() {
-  simSpeed = Math.max(0.1, Math.min(5, parseFloat(this.value) || 1));
+document.getElementById('speedSlider').oninput = function() {
+  simSpeed = parseFloat(this.value);
+  document.getElementById('speedLabel').textContent = simSpeed.toFixed(1) + 'x';
 };
 
 document.getElementById('btnPlay').onclick = function() {
@@ -1097,6 +1162,8 @@ document.getElementById('btnReset').onclick = () => {
   selectedBody = null;
   frictionTarget = null; frictionStep = 0;
   springTarget = null; ropeTarget = null;
+  viewScale = 1; viewOffset = v2(0, 0);
+  updateZoomInfo();
   updateProps();
 };
 
@@ -1114,6 +1181,7 @@ document.addEventListener('keydown', e => {
 
 // ============ INIT & LOOP ============
 document.getElementById('btnPlay').textContent = '▶ 运行';
+updateZoomInfo();
 
 let lastTime = performance.now();
 function loop(now) {
