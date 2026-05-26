@@ -1,0 +1,966 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>黑洞模拟器 — 施瓦西黑洞</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #000; color: #ccc;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  height: 100vh; overflow: hidden;
+  display: flex;
+}
+
+/* ---- Left Panel ---- */
+.panel-left {
+  width: 185px; background: #0a0a14;
+  padding: 14px 12px; display: flex; flex-direction: column; gap: 6px;
+  z-index: 10; flex-shrink: 0; overflow-y: auto;
+}
+.panel-left h2 { font-size: 14px; color: #e94560; text-align: center; letter-spacing: 1px; margin-bottom: 4px; }
+.panel-left label { font-size: 10px; color: #667; text-transform: uppercase; letter-spacing: 1px; }
+.panel-left input[type=range] { width: 100%; accent-color: #e94560; }
+.panel-left .val-row { display: flex; justify-content: space-between; align-items: center; font-size: 11px; }
+.panel-left .val-row .kv { color: #4ecdc4; font-family: 'Consolas', monospace; }
+.panel-left button {
+  padding: 6px 10px; border: 1px solid #2a2a3a; border-radius: 5px;
+  background: #12122a; color: #ccc; cursor: pointer; font-size: 11px;
+  transition: all 0.15s;
+}
+.panel-left button:hover { background: #2a2a4a; }
+.panel-left button.active { background: #e94560; border-color: #e94560; }
+.sep { border-top: 1px solid #1a1a3a; margin: 4px 0; }
+
+/* ---- Canvas Container ---- */
+.canvas-container {
+  flex: 1; position: relative; overflow: hidden; min-width: 0;
+  cursor: crosshair;
+}
+.canvas-container canvas {
+  position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+}
+#webgl { z-index: 1; pointer-events: none; }
+#overlay { z-index: 2; }
+
+/* ---- Right Info Panel ---- */
+.panel-right {
+  width: 175px; background: #0a0a14;
+  padding: 14px 12px; display: flex; flex-direction: column; gap: 6px;
+  z-index: 10; flex-shrink: 0; overflow-y: auto;
+}
+.panel-right h3 { font-size: 12px; color: #4ecdc4; }
+.panel-right .info-line { font-size: 11px; line-height: 1.5; }
+.panel-right .info-line span { color: #4ecdc4; font-family: 'Consolas', monospace; }
+
+/* ---- Formula Sidebar ---- */
+.formula-tab {
+  position: fixed; right: 0; top: 50%; transform: translateY(-50%);
+  background: #1a1a3a; color: #ccc; padding: 12px 7px;
+  border-radius: 6px 0 0 6px; cursor: pointer; z-index: 25;
+  writing-mode: vertical-lr; font-size: 12px; letter-spacing: 2px;
+  user-select: none; border: 1px solid #2a2a4a; border-right: none;
+  transition: background 0.2s;
+}
+.formula-tab:hover { background: #2a2a4a; }
+.formula-sidebar {
+  position: fixed; right: -380px; top: 0; width: 380px; height: 100vh;
+  background: #0d0d1a; border-left: 1px solid #2a2a4a;
+  z-index: 24; transition: right 0.3s ease; overflow-y: auto;
+  padding: 20px 18px; font-size: 12px; line-height: 1.7;
+  box-shadow: -4px 0 20px rgba(0,0,0,0.5);
+}
+.formula-sidebar.open { right: 0; }
+.formula-sidebar h3 { color: #e94560; margin: 18px 0 8px; font-size: 13px; }
+.formula-sidebar h3:first-child { margin-top: 0; }
+.formula-sidebar pre {
+  background: #080818; border: 1px solid #1a1a3a; border-radius: 8px;
+  padding: 12px 14px; color: #ccc; font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 11px; overflow-x: auto; line-height: 1.7; white-space: pre;
+}
+.formula-sidebar .var { color: #e94560; }
+.formula-sidebar .const { color: #e67e22; }
+.formula-sidebar .note { color: #667; font-size: 10px; }
+
+/* ---- Bottom Bar ---- */
+.bar-bottom {
+  position: fixed; bottom: 0; left: 0; right: 0;
+  background: #0a0a14; border-top: 1px solid #1a1a3a;
+  padding: 4px 16px; font-size: 10px; color: #555;
+  display: flex; gap: 24px; z-index: 30; pointer-events: none;
+}
+.bar-bottom span { color: #4ecdc4; }
+</style>
+</head>
+<body>
+
+<div class="panel-left">
+  <h2>⚫ 黑洞模拟器</h2>
+  <label>黑洞质量 M</label>
+  <input type="range" id="massSlider" min="0.3" max="4" value="1" step="0.01">
+  <div class="val-row">M = <span class="kv" id="massLabel">1.00</span> M☉</div>
+  <div class="sep"></div>
+  <label>吸积盘内半径</label>
+  <input type="range" id="diskInner" min="3" max="12" value="6" step="0.1">
+  <div class="val-row">r_in = <span class="kv" id="diskInnerLabel">6.0</span> r_s</div>
+  <label>吸积盘外半径</label>
+  <input type="range" id="diskOuter" min="8" max="40" value="18" step="0.5">
+  <div class="val-row">r_out = <span class="kv" id="diskOuterLabel">18.0</span> r_s</div>
+  <label>盘亮度</label>
+  <input type="range" id="diskBright" min="0.1" max="2" value="0.8" step="0.05">
+  <div class="sep"></div>
+  <label>粒子生成速率</label>
+  <input type="range" id="spawnRate" min="0" max="8" value="2" step="0.1">
+  <div class="val-row">速率 = <span class="kv" id="spawnRateLabel">2.0</span> /s</div>
+  <label>拖尾长度</label>
+  <input type="range" id="trailLen" min="10" max="120" value="40">
+  <div class="val-row">尾长 = <span class="kv" id="trailLenLabel">40</span> 帧</div>
+  <label>模拟速度</label>
+  <input type="range" id="simSpeed" min="0.1" max="5" value="1" step="0.1">
+  <div class="val-row">速度 = <span class="kv" id="speedLabel">1.0</span>x</div>
+  <div class="sep"></div>
+  <button id="btnAuto" class="active">🔵 自动发射</button>
+  <button id="btnClear">🗑 清除粒子</button>
+  <button id="btnReset">🔄 重置</button>
+</div>
+
+<div class="canvas-container" id="canvasContainer">
+  <canvas id="webgl"></canvas>
+  <canvas id="overlay"></canvas>
+</div>
+
+<div class="panel-right">
+  <h3>关键轨道</h3>
+  <div class="info-line">事件视界 r_s = <span id="infoRS">2.00</span></div>
+  <div class="info-line">光子球 r_ph = <span id="infoRPh">3.00</span></div>
+  <div class="info-line">ISCO r_ISCO = <span id="infoRISCO">6.00</span></div>
+  <div class="sep"></div>
+  <h3>选中粒子</h3>
+  <div class="info-line" id="particleInfo"><span style="color:#667">点击粒子查看轨道<br>拖拽发射粒子</span></div>
+</div>
+
+<div class="formula-tab" id="formulaTab">📐 公式</div>
+<div class="formula-sidebar" id="formulaSidebar">
+  <h3>时空几何 — 施瓦西度规</h3>
+  <pre>ds² = -(1 - <span class="var">2M</span>/<span class="const">r</span>) dt²
+    + (1 - <span class="var">2M</span>/<span class="const">r</span>)⁻¹ dr²
+    + <span class="const">r</span>²(dθ² + sin²θ dφ²)
+
+<span class="const">r_s</span> = <span class="var">2GM/c²</span>    事件视界
+<span class="const">r_ph</span> = <span class="var">3GM/c²</span>   光子球
+<span class="const">r_isco</span> = <span class="var">6GM/c²</span>  最内稳定圆轨道
+
+<span class="note">本模拟使用几何单位制 G=c=1</span></pre>
+  <h3>光线追踪 — 零测地线</h3>
+  <pre>测地线方程:
+d²x^μ/dτ² + Γ^μ_αβ (dx^α/dτ)(dx^β/dτ) = 0
+
+赤道面简化:
+d²r/dτ² = (<span class="var">M</span>/<span class="const">r</span>²)(1-<span class="var">2M</span>/<span class="const">r</span>)⁻¹(dr/dτ)²
+        + (<span class="const">r</span>-<span class="var">2M</span>)(dφ/dτ)²
+
+光线到达吸积盘时:
+<span class="var">D</span> = √(1-<span class="var">2M</span>/<span class="const">r</span>) / (1 - <span class="const">v·n</span>)
+
+<span class="note">D > 1 = 蓝移 / D &lt; 1 = 红移</span></pre>
+  <h3>粒子轨道 — 有效势能</h3>
+  <pre>V_eff(<span class="const">r</span>) = (1 - <span class="var">2M</span>/<span class="const">r</span>)(1 + <span class="var">L²</span>/<span class="const">r</span>²)
+
+轨道方程 (u = 1/r):
+d²u/dφ² + u = <span class="var">GM/h²</span> + <span class="var">3GM/c²</span> u²
+
+轨道类型:
+· <span class="var">L</span> > <span class="var">4M</span> → 双曲飞越或椭圆束缚
+· <span class="var">L</span> ≈ <span class="var">√12M</span> → 近圆轨道 (ISCO)
+· <span class="var">L</span> &lt; <span class="var">4M</span> → 螺旋坠入视界</pre>
+</div>
+
+<div class="bar-bottom">
+  <span>拖拽 = 发射</span> |
+  <span>滚轮(空) = 缩放</span> |
+  <span>滚轮(黑洞) = 质量</span> |
+  <span>中键 = 平移</span> |
+  <span>点击粒子 = 查看轨道</span> |
+  <span>右键 = 清除选中</span>
+</div>
+
+<script>
+// ===================== WEBGL SETUP =====================
+const webglCanvas = document.getElementById('webgl');
+const gl = webglCanvas.getContext('webgl', { antialias: false, preserveDrawingBuffer: true });
+if (!gl) {
+  document.getElementById('canvasContainer').innerHTML =
+    '<p style="color:#e94560;padding:40px;text-align:center">WebGL 不受支持，请使用现代浏览器</p>';
+}
+
+const vsSource = `#version 100
+attribute vec2 aPos;
+varying vec2 vUV;
+void main() {
+  vUV = aPos * 0.5 + 0.5;
+  gl_Position = vec4(aPos, 0.0, 1.0);
+}`;
+
+const fsSource = `#version 100
+precision highp float;
+varying vec2 vUV;
+uniform vec2 uResolution;
+uniform float uMass;
+uniform float uDiskInner;
+uniform float uDiskOuter;
+uniform float uDiskBright;
+
+const float PI = 3.141592653589793;
+
+vec3 acesTonemap(vec3 c) {
+  float a = 2.51, b = 0.03, c2 = 2.43, d = 0.59, e = 0.14;
+  return clamp((c*(a*c+b))/(c*(c2*c+d)+e), 0.0, 1.0);
+}
+
+void main() {
+  float M = uMass;
+  float camDist = 7.0 + M * 2.0;
+  vec3 camPos = vec3(0.0, 1.5 + M * 0.5, camDist);
+  vec3 lookAt = vec3(0.0, 0.0, 0.0);
+  vec3 forward = normalize(lookAt - camPos);
+  vec3 right = normalize(cross(forward, vec3(0.0, 1.0, 0.0)));
+  vec3 up = cross(right, forward);
+
+  float aspect = uResolution.x / uResolution.y;
+  vec2 uv = (vUV - 0.5) * 2.0;
+  vec3 rayDir = normalize(forward + uv.x * right * aspect * 1.0 + uv.y * up);
+
+  vec3 pos = camPos;
+  vec3 vel = -rayDir;
+  vec3 color = vec3(0.0, 0.0, 0.03);
+
+  float horizon = 2.0 * M;
+  float dt = 0.04;
+  float maxDist = camDist * 2.5;
+
+  for (int i = 0; i < 600; i++) {
+    float r = length(pos);
+    if (r < horizon * 1.001) {
+      color = vec3(0.0, 0.0, 0.0);
+      break;
+    }
+    if (r > maxDist) break;
+
+    // Adaptive step near horizon
+    float adaptDt = dt * (1.0 - exp(-(r - horizon) * 0.5 / M));
+    adaptDt = max(adaptDt, 0.003);
+
+    // Check accretion disk hit (equatorial plane)
+    float diskR = length(vec2(pos.x, pos.z));
+    float diskY = abs(pos.y);
+    float diskThickness = 0.05 + 0.02 * diskR / M;
+
+    if (diskY < diskThickness * diskR &&
+        diskR >= uDiskInner * M &&
+        diskR <= uDiskOuter * M) {
+
+      // Speed at disk (Keplerian approximation)
+      float vK = sqrt(M / diskR);
+      vec3 velDir = normalize(vec3(-pos.z, 0.0, pos.x)); // tangential
+      float vDotN = dot(velDir, vel);
+
+      // Doppler factor
+      float g = sqrt(1.0 - horizon / diskR);
+      float doppler = g / (1.0 - vDotN * vK);
+      doppler = clamp(doppler, 0.2, 5.0);
+
+      // Temperature: hot inner, cool outer
+      float tNorm = (diskR - uDiskInner * M) / max((uDiskOuter - uDiskInner) * M, 1.0);
+      float temp = 1.0 - tNorm;
+      temp = pow(temp, 1.5);
+
+      vec3 coldCol = vec3(0.85, 0.35, 0.12);  // reddish
+      vec3 hotCol  = vec3(0.30, 0.60, 1.00);  // blue-white
+      vec3 diskCol = mix(coldCol, hotCol, temp * doppler * 0.7);
+
+      // Brightness ∝ r^(-3)
+      float brightness = uDiskBright * 0.5 * pow(uDiskInner * M / diskR, 3.0);
+      diskCol *= brightness * doppler;
+
+      // Gravitational redshift darkening
+      float redshiftFactor = sqrt(1.0 - horizon / diskR);
+      diskCol *= redshiftFactor * 0.7 + 0.3;
+
+      color = max(color, diskCol);
+    }
+
+    // Photon sphere glow (r ≈ 3M)
+    float phDist = abs(r - 3.0 * M);
+    float photonGlow = exp(-phDist * phDist / (0.15 * M * M));
+    color += vec3(0.04, 0.02, 0.12) * photonGlow * 0.6;
+
+    // Integrate geodesic
+    float rho = r;
+    vec3 posN = pos / rho;
+    float posDot = dot(posN, vel);
+    float r3 = rho * rho * rho;
+    float factor = -M / r3;
+    vec3 accel = factor * pos * (1.0 + horizon / rho);
+
+    // RK2 step
+    vec3 halfPos = pos + vel * adaptDt * 0.5;
+    float halfR = length(halfPos);
+    float halfF = -M / (halfR * halfR * halfR) * (1.0 + horizon / halfR);
+    vec3 halfAccel = halfF * halfPos;
+
+    pos += vel * adaptDt + 0.5 * halfAccel * adaptDt * adaptDt;
+    vel += halfAccel * adaptDt;
+    vel = normalize(vel);
+  }
+
+  // Sky background
+  color = mix(vec3(0.0, 0.0, 0.06), color, 0.95);
+  color = acesTonemap(color);
+
+  // Vignette
+  float vignette = 1.0 - length(vUV - 0.5) * 0.5;
+  color *= vignette;
+
+  gl_FragColor = vec4(color, 1.0);
+}`;
+
+function compileShader(gl, type, source) {
+  const shader = gl.createShader(type);
+  gl.shaderSource(shader, source);
+  gl.compileShader(shader);
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+    console.error('Shader compile error:', gl.getShaderInfoLog(shader));
+    return null;
+  }
+  return shader;
+}
+
+function initWebGL() {
+  const vs = compileShader(gl, gl.VERTEX_SHADER, vsSource);
+  const fs = compileShader(gl, gl.FRAGMENT_SHADER, fsSource);
+  if (!vs || !fs) return false;
+  const program = gl.createProgram();
+  gl.attachShader(program, vs);
+  gl.attachShader(program, fs);
+  gl.linkProgram(program);
+  gl.useProgram(program);
+
+  const posBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+  const aPos = gl.getAttribLocation(program, 'aPos');
+  gl.enableVertexAttribArray(aPos);
+  gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+  return {
+    program,
+    uniforms: {
+      uResolution: gl.getUniformLocation(program, 'uResolution'),
+      uMass: gl.getUniformLocation(program, 'uMass'),
+      uDiskInner: gl.getUniformLocation(program, 'uDiskInner'),
+      uDiskOuter: gl.getUniformLocation(program, 'uDiskOuter'),
+      uDiskBright: gl.getUniformLocation(program, 'uDiskBright'),
+    }
+  };
+}
+
+const webgl = initWebGL();
+
+function resizeGL() {
+  if (!gl) return;
+  const rect = webglCanvas.parentElement.getBoundingClientRect();
+  const w = Math.floor(rect.width);
+  const h = Math.floor(rect.height);
+  if (webglCanvas.width !== w || webglCanvas.height !== h) {
+    webglCanvas.width = w;
+    webglCanvas.height = h;
+    gl.viewport(0, 0, w, h);
+  }
+}
+
+// ===================== SIM STATE =====================
+let mass = 1.0;
+let diskInner = 6.0;
+let diskOuter = 18.0;
+let diskBright = 0.8;
+let spawnRate = 2.0;
+let trailLength = 40;
+let simSpeed = 1.0;
+let autoSpawn = true;
+let simTime = 0;
+
+// ===================== CANVAS 2D OVERLAY =====================
+const overlay = document.getElementById('overlay');
+const octx = overlay.getContext('2d');
+
+function resizeOverlay() {
+  const rect = overlay.parentElement.getBoundingClientRect();
+  const w = Math.floor(rect.width);
+  const h = Math.floor(rect.height);
+  if (overlay.width !== w || overlay.height !== h) {
+    overlay.width = w;
+    overlay.height = h;
+  }
+}
+
+let viewScale = 22; // pixels per M
+let viewOffset = { x: 0, y: 0 };
+let centerX, centerY;
+
+function updateCenter() {
+  centerX = overlay.width / 2 + viewOffset.x;
+  centerY = overlay.height / 2 + viewOffset.y;
+}
+
+function worldToScreen(wx, wy) {
+  return { x: centerX + wx * viewScale, y: centerY - wy * viewScale };
+}
+
+function screenToWorld(sx, sy) {
+  return { x: (sx - centerX) / viewScale, y: -(sy - centerY) / viewScale };
+}
+
+// ===================== PARTICLE CLASS =====================
+class Particle {
+  constructor(x, y, vx, vy) {
+    this.x = x; this.y = y;
+    this.vx = vx; this.vy = vy;
+    this.trail = [];
+    this.alive = true;
+    this.stepCount = 0;
+    this.maxSteps = 3000;
+  }
+
+  integrate(dt) {
+    if (!this.alive) return;
+    this.stepCount++;
+
+    const r = Math.sqrt(this.x * this.x + this.y * this.y);
+    const horizon = 2.0 * mass;
+
+    if (r < horizon * 0.98) { this.alive = false; return; }
+    if (r > 55.0 || this.stepCount >= this.maxSteps) { this.alive = false; return; }
+
+    // Store trail
+    this.trail.push({ x: this.x, y: this.y });
+    if (this.trail.length > trailLength) this.trail.shift();
+
+    // RK4 for Schwarzschild geodesic (equatorial, massive particle)
+    const M = mass;
+    const getAccel = (px, py) => {
+      const r2 = px * px + py * py;
+      const r = Math.sqrt(r2);
+      if (r < horizon * 0.5) return { ax: 0, ay: 0 };
+      const r3 = r2 * r;
+      const factor = -M / r3;
+      // First-order GR correction
+      const corr = 1.0 + horizon / r;
+      return { ax: factor * px * corr, ay: factor * py * corr };
+    };
+
+    const h = dt;
+    // k1
+    const a1 = getAccel(this.x, this.y);
+    const k1vx = a1.ax * h, k1vy = a1.ay * h;
+    const k1x = this.vx * h, k1y = this.vy * h;
+    // k2
+    const a2 = getAccel(this.x + 0.5 * k1x, this.y + 0.5 * k1y);
+    const k2vx = a2.ax * h, k2vy = a2.ay * h;
+    const k2x = (this.vx + 0.5 * k1vx) * h, k2y = (this.vy + 0.5 * k1vy) * h;
+    // k3
+    const a3 = getAccel(this.x + 0.5 * k2x, this.y + 0.5 * k2y);
+    const k3vx = a3.ax * h, k3vy = a3.ay * h;
+    const k3x = (this.vx + 0.5 * k2vx) * h, k3y = (this.vy + 0.5 * k2vy) * h;
+    // k4
+    const a4 = getAccel(this.x + k3x, this.y + k3y);
+    const k4vx = a4.ax * h, k4vy = a4.ay * h;
+    const k4x = (this.vx + k3vx) * h, k4y = (this.vy + k3vy) * h;
+
+    this.x += (k1x + 2 * k2x + 2 * k3x + k4x) / 6;
+    this.y += (k1y + 2 * k2y + 2 * k3y + k4y) / 6;
+    this.vx += (k1vx + 2 * k2vx + 2 * k3vx + k4vx) / 6;
+    this.vy += (k1vy + 2 * k2vy + 2 * k3vy + k4vy) / 6;
+  }
+}
+
+// ===================== PARTICLE MANAGEMENT =====================
+const particles = [];
+let spawnAccum = 0;
+
+function spawnParticle(wx, wy, vx, vy) {
+  if (!vx) {
+    // Random edge spawn toward center
+    const angle = Math.random() * Math.PI * 2;
+    const dist = 18 + Math.random() * 12;
+    wx = Math.cos(angle) * dist;
+    wy = Math.sin(angle) * dist;
+    // Velocity roughly toward center with random impact parameter
+    const impact = (Math.random() - 0.5) * 8;
+    const aimAngle = angle + Math.PI + (Math.random() - 0.5) * 1.2;
+    const speed = 0.3 + Math.random() * 0.5;
+    vx = Math.cos(aimAngle) * speed + Math.cos(angle) * impact * 0.02;
+    vy = Math.sin(aimAngle) * speed + Math.sin(angle) * impact * 0.02;
+  }
+  particles.push(new Particle(wx, wy, vx, vy));
+}
+
+// ===================== OVERLAY RENDERING =====================
+function speedColor(v) {
+  const t = Math.min(1, Math.max(0, (v - 0.05) / 1.2));
+  const h = (1 - t) * 10 + t * 210; // red→blue
+  return `hsl(${h}, 85%, ${50 + t * 25}%)`;
+}
+
+function drawOverlay() {
+  octx.clearRect(0, 0, overlay.width, overlay.height);
+  updateCenter();
+
+  const rs = 2.0 * mass;
+  const rph = 3.0 * mass;
+  const risco = 6.0 * mass;
+
+  // Annotation circles
+  const circles = [
+    { r: rph, color: 'rgba(255,60,120,0.35)', width: 1, dash: [5, 7], label: '光子球 r=3M' },
+    { r: risco, color: 'rgba(0,210,200,0.3)', width: 1, dash: [2, 8], label: 'ISCO r=6M' },
+  ];
+
+  for (const c of circles) {
+    const sr = c.r * viewScale;
+    if (sr > 3 && sr < overlay.width * 3) {
+      octx.strokeStyle = c.color;
+      octx.lineWidth = c.width;
+      octx.setLineDash(c.dash);
+      octx.beginPath();
+      octx.arc(centerX, centerY, sr, 0, Math.PI * 2);
+      octx.stroke();
+      octx.setLineDash([]);
+      if (c.label && sr > 30) {
+        const lx = centerX + sr + 5;
+        const ly = centerY + (c === circles[0] ? -6 : 18);
+        octx.fillStyle = c.color;
+        octx.font = '10px "Segoe UI", system-ui, sans-serif';
+        octx.fillText(c.label, lx, ly);
+      }
+    }
+  }
+
+  // Event horizon disk
+  const sr = rs * viewScale;
+  if (sr > 0.5) {
+    const grad = octx.createRadialGradient(centerX, centerY, sr * 0.3, centerX, centerY, sr);
+    grad.addColorStop(0, '#000');
+    grad.addColorStop(0.7, '#020208');
+    grad.addColorStop(1, '#0a0a16');
+    octx.fillStyle = grad;
+    octx.beginPath();
+    octx.arc(centerX, centerY, sr, 0, Math.PI * 2);
+    octx.fill();
+    // Horizon ring edge glow
+    octx.strokeStyle = 'rgba(80,40,100,0.3)';
+    octx.lineWidth = 2;
+    octx.stroke();
+  }
+
+  // Draw particles
+  for (const p of particles) {
+    if (!p.alive) continue;
+    const v = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
+
+    // Trail
+    if (p.trail.length > 1) {
+      for (let i = 1; i < p.trail.length; i++) {
+        const alpha = (i / p.trail.length) * 0.7;
+        const v0 = p.trail[i - 1];
+        const v1 = p.trail[i];
+        const s0 = worldToScreen(v0.x, v0.y);
+        const s1 = worldToScreen(v1.x, v1.y);
+        // Skip if too far (offscreen)
+        if (Math.abs(s0.x) > overlay.width + 200 || Math.abs(s1.x) > overlay.width + 200) break;
+        octx.strokeStyle = speedColor(v);
+        octx.globalAlpha = alpha;
+        octx.lineWidth = 1.0;
+        octx.beginPath();
+        octx.moveTo(s0.x, s0.y);
+        octx.lineTo(s1.x, s1.y);
+        octx.stroke();
+      }
+      octx.globalAlpha = 1;
+    }
+
+    // Particle dot
+    const s = worldToScreen(p.x, p.y);
+    if (s.x > -20 && s.x < overlay.width + 20 && s.y > -20 && s.y < overlay.height + 20) {
+      // Glow
+      const glow = octx.createRadialGradient(s.x, s.y, 0, s.x, s.y, 6);
+      glow.addColorStop(0, speedColor(v));
+      glow.addColorStop(1, 'transparent');
+      octx.fillStyle = glow;
+      octx.fillRect(s.x - 6, s.y - 6, 12, 12);
+      // Core
+      octx.fillStyle = '#fff';
+      octx.beginPath();
+      octx.arc(s.x, s.y, 2.5, 0, Math.PI * 2);
+      octx.fill();
+    }
+
+    // Highlight selected particle
+    if (p === selectedParticle) {
+      const ss = worldToScreen(p.x, p.y);
+      octx.strokeStyle = '#e94560';
+      octx.lineWidth = 2;
+      octx.setLineDash([3, 2]);
+      octx.beginPath();
+      octx.arc(ss.x, ss.y, 10, 0, Math.PI * 2);
+      octx.stroke();
+      octx.setLineDash([]);
+    }
+  }
+
+  // Drag preview arrow
+  if (dragging) {
+    const sx = dragStart.sx, sy = dragStart.sy;
+    const ex = mouseX, ey = mouseY;
+    const dx = ex - sx, dy = ey - sy;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (len > 4) {
+      octx.strokeStyle = 'rgba(255,200,100,0.6)';
+      octx.lineWidth = 1.5;
+      octx.setLineDash([6, 3]);
+      octx.beginPath();
+      octx.moveTo(sx, sy);
+      octx.lineTo(ex, ey);
+      octx.stroke();
+      octx.setLineDash([]);
+      // Arrowhead
+      const nx = dx / len, ny = dy / len;
+      const hs = Math.min(12, len * 0.4);
+      octx.fillStyle = 'rgba(255,200,100,0.7)';
+      octx.beginPath();
+      octx.moveTo(ex, ey);
+      octx.lineTo(ex - nx * hs + ny * hs * 0.5, ey - ny * hs - nx * hs * 0.5);
+      octx.lineTo(ex - nx * hs - ny * hs * 0.5, ey - ny * hs + nx * hs * 0.5);
+      octx.closePath();
+      octx.fill();
+      // Speed display
+      const w0 = screenToWorld(sx, sy);
+      const w1 = screenToWorld(ex, ey);
+      const speed = Math.sqrt((w1.x - w0.x) ** 2 + (w1.y - w0.y) ** 2) * 3;
+      octx.fillStyle = 'rgba(255,200,100,0.8)';
+      octx.font = '11px Consolas, monospace';
+      octx.fillText(`${speed.toFixed(2)} c`, ex + 6, ey - 4);
+    }
+  }
+}
+
+// ===================== INTERACTION =====================
+let mouseX = 0, mouseY = 0;
+let dragging = false;
+let dragStart = { sx: 0, sy: 0 };
+let panning = false;
+let panStart = { x: 0, y: 0, ox: 0, oy: 0 };
+let selectedParticle = null;
+
+const container = document.getElementById('canvasContainer');
+
+container.addEventListener('mousedown', (e) => {
+  // Middle button: start pan
+  if (e.button === 1) {
+    e.preventDefault();
+    panning = true;
+    panStart = { x: e.clientX, y: e.clientY, ox: viewOffset.x, oy: viewOffset.y };
+    return;
+  }
+  // Right click: clear selection
+  if (e.button === 2) {
+    e.preventDefault();
+    selectedParticle = null;
+    updateParticleInfo();
+    return;
+  }
+  if (e.button !== 0) return;
+
+  const rect = overlay.getBoundingClientRect();
+  const sx = e.clientX - rect.left;
+  const sy = e.clientY - rect.top;
+  mouseX = sx; mouseY = sy;
+  const w = screenToWorld(sx, sy);
+
+  // Check particle hit
+  let best = null, bestDist = 1.0 / viewScale * 25; // ~25px radius
+  for (const p of particles) {
+    if (!p.alive) continue;
+    const dx = p.x - w.x, dy = p.y - w.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < bestDist) { bestDist = dist; best = p; }
+  }
+  if (best) {
+    selectedParticle = best;
+    updateParticleInfo();
+    return;
+  }
+
+  // Start drag for particle launch
+  if (e.shiftKey) {
+    // Shift+click: single particle at cursor
+    const speed = 0.5;
+    const angle = Math.random() * Math.PI * 2;
+    spawnParticle(w.x, w.y, Math.cos(angle) * speed, Math.sin(angle) * speed);
+    return;
+  }
+
+  dragging = true;
+  dragStart = { sx, sy };
+  selectedParticle = null;
+  updateParticleInfo();
+});
+
+window.addEventListener('mousemove', (e) => {
+  if (panning) {
+    viewOffset.x = panStart.ox + (e.clientX - panStart.x);
+    viewOffset.y = panStart.oy + (e.clientY - panStart.y);
+    return;
+  }
+  const rect = overlay.getBoundingClientRect();
+  mouseX = e.clientX - rect.left;
+  mouseY = e.clientY - rect.top;
+});
+
+window.addEventListener('mouseup', (e) => {
+  if (e.button === 1) { panning = false; return; }
+  if (e.button !== 0) return;
+  if (dragging) {
+    const w0 = screenToWorld(dragStart.sx, dragStart.sy);
+    const w1 = screenToWorld(mouseX, mouseY);
+    const vx = (w1.x - w0.x) * 2.5; // scale drag distance to velocity
+    const vy = (w1.y - w0.y) * 2.5;
+    const speed = Math.sqrt(vx * vx + vy * vy);
+    if (speed > 0.05) {
+      spawnParticle(w0.x, w0.y, vx, vy);
+    }
+  }
+  dragging = false;
+});
+
+container.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const rect = overlay.getBoundingClientRect();
+  const sx = e.clientX - rect.left;
+  const sy = e.clientY - rect.top;
+  const w = screenToWorld(sx, sy);
+
+  // Near black hole center → adjust mass
+  const distFromBH = Math.sqrt((sx - centerX) ** 2 + (sy - centerY) ** 2);
+  const rsScreen = 2.0 * mass * viewScale;
+  if (distFromBH < Math.max(rsScreen * 1.5, 40)) {
+    const delta = e.deltaY > 0 ? -0.03 : 0.03;
+    mass = Math.max(0.2, Math.min(5.0, mass + delta));
+    updateMassUI();
+    updateInfoPanel();
+    return;
+  }
+
+  // Zoom
+  const zoom = e.deltaY < 0 ? 1.1 : 0.9;
+  const newScale = Math.max(4, Math.min(120, viewScale * zoom));
+  viewOffset.x = sx - w.x * newScale - (overlay.width / 2);
+  viewOffset.y = sy + w.y * newScale - (overlay.height / 2);
+  viewScale = newScale;
+}, { passive: false });
+
+container.addEventListener('contextmenu', (e) => e.preventDefault());
+
+// Shift+click hint
+container.title = '拖拽发射粒子 | Shift+点击 = 原地发射 | 滚轮缩放 | 滚轮近黑洞 = 调质量 | 中键平移';
+
+// ===================== UI BINDINGS =====================
+function updateMassUI() {
+  document.getElementById('massSlider').value = mass;
+  document.getElementById('massLabel').textContent = mass.toFixed(2);
+}
+
+function updateInfoPanel() {
+  document.getElementById('infoRS').textContent = (2.0 * mass).toFixed(2);
+  document.getElementById('infoRPh').textContent = (3.0 * mass).toFixed(2);
+  document.getElementById('infoRISCO').textContent = (6.0 * mass).toFixed(2);
+}
+
+function updateParticleInfo() {
+  const el = document.getElementById('particleInfo');
+  if (!selectedParticle || !selectedParticle.alive) {
+    el.innerHTML = '<span style="color:#667">点击粒子查看轨道<br><br>拖拽发射粒子<br>Shift+点击原地生成</span>';
+    return;
+  }
+  const p = selectedParticle;
+  const r = Math.sqrt(p.x * p.x + p.y * p.y);
+  const v = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
+  const L = Math.abs(p.x * p.vy - p.y * p.vx);
+  const E = v * v / 2 - mass / r;
+  const rHorizon = 2.0 * mass;
+  let orbitType;
+  if (r < rHorizon * 1.1) orbitType = '坠入视界';
+  else if (r > 30) orbitType = '远距离飞越';
+  else if (L < 4.0 * mass) orbitType = '螺旋坠入';
+  else if (L > 6.0 * mass) orbitType = '双曲逃逸';
+  else orbitType = '椭圆束缚';
+  el.innerHTML = `
+    r = <span>${r.toFixed(2)}</span><br>
+    v = <span>${v.toFixed(3)}</span> c<br>
+    L = <span>${L.toFixed(3)}</span><br>
+    |E| = <span>${Math.abs(E).toFixed(3)}</span><br>
+    <span>${orbitType}</span>
+  `;
+}
+
+// Slider bindings
+document.getElementById('massSlider').addEventListener('input', function() {
+  mass = parseFloat(this.value);
+  document.getElementById('massLabel').textContent = mass.toFixed(2);
+  updateInfoPanel();
+});
+
+document.getElementById('diskInner').addEventListener('input', function() {
+  diskInner = parseFloat(this.value);
+  document.getElementById('diskInnerLabel').textContent = diskInner.toFixed(1);
+});
+
+document.getElementById('diskOuter').addEventListener('input', function() {
+  diskOuter = parseFloat(this.value);
+  document.getElementById('diskOuterLabel').textContent = diskOuter.toFixed(1);
+});
+
+document.getElementById('diskBright').addEventListener('input', function() {
+  diskBright = parseFloat(this.value);
+});
+
+document.getElementById('spawnRate').addEventListener('input', function() {
+  spawnRate = parseFloat(this.value);
+  document.getElementById('spawnRateLabel').textContent = spawnRate.toFixed(1);
+});
+
+document.getElementById('trailLen').addEventListener('input', function() {
+  trailLength = parseInt(this.value);
+  document.getElementById('trailLenLabel').textContent = trailLength;
+});
+
+document.getElementById('simSpeed').addEventListener('input', function() {
+  simSpeed = parseFloat(this.value);
+  document.getElementById('speedLabel').textContent = simSpeed.toFixed(1);
+});
+
+document.getElementById('btnAuto').addEventListener('click', function() {
+  autoSpawn = !autoSpawn;
+  this.classList.toggle('active', autoSpawn);
+  this.textContent = autoSpawn ? '🔵 自动发射' : '⚪ 手动发射';
+});
+
+document.getElementById('btnClear').addEventListener('click', () => {
+  particles.length = 0;
+  spawnAccum = 0;
+});
+
+document.getElementById('btnReset').addEventListener('click', () => {
+  mass = 1.0; diskInner = 6.0; diskOuter = 18.0; diskBright = 0.8;
+  spawnRate = 2.0; trailLength = 40; simSpeed = 1.0; autoSpawn = true;
+  viewScale = 22; viewOffset = { x: 0, y: 0 };
+  particles.length = 0; spawnAccum = 0; selectedParticle = null;
+
+  document.getElementById('massSlider').value = 1.0;
+  document.getElementById('massLabel').textContent = '1.00';
+  document.getElementById('diskInner').value = 6;
+  document.getElementById('diskInnerLabel').textContent = '6.0';
+  document.getElementById('diskOuter').value = 18;
+  document.getElementById('diskOuterLabel').textContent = '18.0';
+  document.getElementById('diskBright').value = 0.8;
+  document.getElementById('spawnRate').value = 2.0;
+  document.getElementById('spawnRateLabel').textContent = '2.0';
+  document.getElementById('trailLen').value = 40;
+  document.getElementById('trailLenLabel').textContent = '40';
+  document.getElementById('simSpeed').value = 1.0;
+  document.getElementById('speedLabel').textContent = '1.0';
+  document.getElementById('btnAuto').classList.add('active');
+  document.getElementById('btnAuto').textContent = '🔵 自动发射';
+
+  updateInfoPanel();
+  updateParticleInfo();
+});
+
+// ===================== FORMULA SIDEBAR =====================
+const formulaTab = document.getElementById('formulaTab');
+const formulaSidebar = document.getElementById('formulaSidebar');
+let formulaOpen = false;
+
+formulaTab.addEventListener('click', () => {
+  formulaOpen = !formulaOpen;
+  formulaSidebar.classList.toggle('open', formulaOpen);
+  formulaTab.textContent = formulaOpen ? '📐 关闭' : '📐 公式';
+});
+
+// Click outside to close
+document.addEventListener('click', (e) => {
+  if (formulaOpen && !formulaSidebar.contains(e.target) && e.target !== formulaTab) {
+    formulaOpen = false;
+    formulaSidebar.classList.remove('open');
+    formulaTab.textContent = '📐 公式';
+  }
+});
+
+// ===================== RENDER LOOP =====================
+function renderGL() {
+  if (!webgl || !gl) return;
+  resizeGL();
+  gl.uniform2f(webgl.uniforms.uResolution, webglCanvas.width, webglCanvas.height);
+  gl.uniform1f(webgl.uniforms.uMass, mass);
+  gl.uniform1f(webgl.uniforms.uDiskInner, diskInner);
+  gl.uniform1f(webgl.uniforms.uDiskOuter, diskOuter);
+  gl.uniform1f(webgl.uniforms.uDiskBright, diskBright);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+
+let lastTime = 0;
+function loop(now) {
+  const rawDt = Math.min(0.05, (now - lastTime) / 1000);
+  lastTime = now;
+  const dt = rawDt * simSpeed;
+  simTime += dt;
+
+  // Auto spawn
+  if (autoSpawn) {
+    spawnAccum += dt * spawnRate;
+    while (spawnAccum >= 1.0) { spawnAccum -= 1.0; spawnParticle(); }
+  }
+
+  // Integrate particles
+  const subSteps = 2;
+  const subDt = dt / subSteps;
+  for (let s = 0; s < subSteps; s++) {
+    for (const p of particles) p.integrate(subDt);
+  }
+
+  // Remove dead
+  for (let i = particles.length - 1; i >= 0; i--) {
+    if (!particles[i].alive) particles.splice(i, 1);
+  }
+
+  // Update selected particle info continuously
+  if (selectedParticle && !selectedParticle.alive) {
+    selectedParticle = null;
+    updateParticleInfo();
+  } else if (selectedParticle) {
+    updateParticleInfo();
+  }
+
+  resizeOverlay();
+  resizeGL();
+  renderGL();
+  drawOverlay();
+  requestAnimationFrame(loop);
+}
+
+// ===================== INIT =====================
+updateInfoPanel();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
