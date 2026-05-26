@@ -136,6 +136,10 @@ body {
   <div class="info-line">光子球 r_ph = <span id="infoRPh">3.00</span></div>
   <div class="info-line">ISCO r_ISCO = <span id="infoRISCO">6.00</span></div>
   <div class="sep"></div>
+  <h3>相机 θ/φ</h3>
+  <div class="info-line">θ = <span id="infoTheta">0.0</span>°</div>
+  <div class="info-line">φ = <span id="infoPhi">60</span>°</div>
+  <div class="sep"></div>
   <h3>选中粒子</h3>
   <div class="info-line" id="particleInfo"><span style="color:#667">点击粒子查看轨道<br>拖拽发射粒子</span></div>
 </div>
@@ -178,11 +182,11 @@ d²u/dφ² + u = <span class="var">GM/h²</span> + <span class="var">3GM/c²</sp
 
 <div class="bar-bottom">
   <span>拖拽 = 发射</span> |
+  <span>右键拖拽 = 旋转视角</span> |
   <span>滚轮(空) = 缩放</span> |
   <span>滚轮(黑洞) = 质量</span> |
   <span>中键 = 平移</span> |
-  <span>点击粒子 = 查看轨道</span> |
-  <span>右键 = 清除选中</span>
+  <span>点击粒子 = 查看轨道</span>
 </div>
 
 <script>
@@ -210,6 +214,9 @@ uniform float uMass;
 uniform float uDiskInner;
 uniform float uDiskOuter;
 uniform float uDiskBright;
+uniform float uCamTheta;
+uniform float uCamPhi;
+uniform float uCamDist;
 
 const float PI = 3.141592653589793;
 
@@ -220,8 +227,12 @@ vec3 acesTonemap(vec3 c) {
 
 void main() {
   float M = uMass;
-  float camDist = 7.0 + M * 2.0;
-  vec3 camPos = vec3(0.0, 1.5 + M * 0.5, camDist);
+  // Spherical → Cartesian camera position
+  vec3 camPos = vec3(
+    uCamDist * sin(uCamPhi) * cos(uCamTheta),
+    uCamDist * cos(uCamPhi),
+    uCamDist * sin(uCamPhi) * sin(uCamTheta)
+  );
   vec3 lookAt = vec3(0.0, 0.0, 0.0);
   vec3 forward = normalize(lookAt - camPos);
   vec3 right = normalize(cross(forward, vec3(0.0, 1.0, 0.0)));
@@ -236,6 +247,7 @@ void main() {
   vec3 color = vec3(0.0, 0.0, 0.03);
 
   float horizon = 2.0 * M;
+  float camDist = uCamDist;
   float dt = 0.04;
   float maxDist = camDist * 2.5;
 
@@ -254,7 +266,7 @@ void main() {
     // Check accretion disk hit (equatorial plane)
     float diskR = length(vec2(pos.x, pos.z));
     float diskY = abs(pos.y);
-    float diskThickness = 0.05 + 0.02 * diskR / M;
+    float diskThickness = 0.08 + 0.04 * diskR / M;
 
     if (diskY < diskThickness * diskR &&
         diskR >= uDiskInner * M &&
@@ -280,7 +292,7 @@ void main() {
       vec3 diskCol = mix(coldCol, hotCol, temp * doppler * 0.7);
 
       // Brightness ∝ r^(-3)
-      float brightness = uDiskBright * 0.5 * pow(uDiskInner * M / diskR, 3.0);
+      float brightness = uDiskBright * 0.7 * pow(uDiskInner * M / diskR, 3.0);
       diskCol *= brightness * doppler;
 
       // Gravitational redshift darkening
@@ -361,6 +373,9 @@ function initWebGL() {
       uDiskInner: gl.getUniformLocation(program, 'uDiskInner'),
       uDiskOuter: gl.getUniformLocation(program, 'uDiskOuter'),
       uDiskBright: gl.getUniformLocation(program, 'uDiskBright'),
+      uCamTheta: gl.getUniformLocation(program, 'uCamTheta'),
+      uCamPhi: gl.getUniformLocation(program, 'uCamPhi'),
+      uCamDist: gl.getUniformLocation(program, 'uCamDist'),
     }
   };
 }
@@ -389,6 +404,11 @@ let trailLength = 40;
 let simSpeed = 1.0;
 let autoSpawn = true;
 let simTime = 0;
+let camTheta = 0.0;
+let camPhi = 1.05;
+let camDist = 8.0;
+let rotating = false;
+let rotStart = { x: 0, y: 0, theta: 0, phi: 0 };
 
 // ===================== CANVAS 2D OVERLAY =====================
 const overlay = document.getElementById('overlay');
@@ -672,11 +692,12 @@ container.addEventListener('mousedown', (e) => {
     panStart = { x: e.clientX, y: e.clientY, ox: viewOffset.x, oy: viewOffset.y };
     return;
   }
-  // Right click: clear selection
+  // Right click: start 3D camera rotation
   if (e.button === 2) {
     e.preventDefault();
-    selectedParticle = null;
-    updateParticleInfo();
+    rotating = true;
+    rotStart = { x: e.clientX, y: e.clientY, theta: camTheta, phi: camPhi };
+    container.style.cursor = 'grabbing';
     return;
   }
   if (e.button !== 0) return;
@@ -722,6 +743,14 @@ window.addEventListener('mousemove', (e) => {
     viewOffset.y = panStart.oy + (e.clientY - panStart.y);
     return;
   }
+  if (rotating) {
+    const dx = e.clientX - rotStart.x;
+    const dy = e.clientY - rotStart.y;
+    camTheta = rotStart.theta - dx * 0.005;
+    camPhi = rotStart.phi + dy * 0.005;
+    camPhi = Math.max(0.1, Math.min(Math.PI - 0.1, camPhi));
+    return;
+  }
   const rect = overlay.getBoundingClientRect();
   mouseX = e.clientX - rect.left;
   mouseY = e.clientY - rect.top;
@@ -729,15 +758,20 @@ window.addEventListener('mousemove', (e) => {
 
 window.addEventListener('mouseup', (e) => {
   if (e.button === 1) { panning = false; return; }
+  if (e.button === 2) { rotating = false; container.style.cursor = 'crosshair'; return; }
   if (e.button !== 0) return;
   if (dragging) {
     const w0 = screenToWorld(dragStart.sx, dragStart.sy);
     const w1 = screenToWorld(mouseX, mouseY);
-    const vx = (w1.x - w0.x) * 2.5; // scale drag distance to velocity
+    const vx = (w1.x - w0.x) * 2.5;
     const vy = (w1.y - w0.y) * 2.5;
     const speed = Math.sqrt(vx * vx + vy * vy);
     if (speed > 0.05) {
       spawnParticle(w0.x, w0.y, vx, vy);
+    } else {
+      // Short click on empty space → clear selection
+      selectedParticle = null;
+      updateParticleInfo();
     }
   }
   dragging = false;
@@ -772,7 +806,7 @@ container.addEventListener('wheel', (e) => {
 container.addEventListener('contextmenu', (e) => e.preventDefault());
 
 // Shift+click hint
-container.title = '拖拽发射粒子 | Shift+点击 = 原地发射 | 滚轮缩放 | 滚轮近黑洞 = 调质量 | 中键平移';
+container.title = '左键拖拽发射粒子 | 右键拖拽旋转3D视角 | 滚轮缩放 | 滚轮近黑洞调质量 | 中键平移';
 
 // ===================== UI BINDINGS =====================
 function updateMassUI() {
@@ -784,6 +818,8 @@ function updateInfoPanel() {
   document.getElementById('infoRS').textContent = (2.0 * mass).toFixed(2);
   document.getElementById('infoRPh').textContent = (3.0 * mass).toFixed(2);
   document.getElementById('infoRISCO').textContent = (6.0 * mass).toFixed(2);
+  document.getElementById('infoTheta').textContent = (camTheta * 180 / Math.PI).toFixed(1);
+  document.getElementById('infoPhi').textContent = (camPhi * 180 / Math.PI).toFixed(0);
 }
 
 function updateParticleInfo() {
@@ -864,6 +900,7 @@ document.getElementById('btnReset').addEventListener('click', () => {
   mass = 1.0; diskInner = 6.0; diskOuter = 18.0; diskBright = 0.8;
   spawnRate = 2.0; trailLength = 40; simSpeed = 1.0; autoSpawn = true;
   viewScale = 22; viewOffset = { x: 0, y: 0 };
+  camTheta = 0.0; camPhi = 1.05;
   particles.length = 0; spawnAccum = 0; selectedParticle = null;
 
   document.getElementById('massSlider').value = 1.0;
@@ -910,11 +947,15 @@ document.addEventListener('click', (e) => {
 function renderGL() {
   if (!webgl || !gl) return;
   resizeGL();
+  camDist = 7.0 + mass * 2.0;
   gl.uniform2f(webgl.uniforms.uResolution, webglCanvas.width, webglCanvas.height);
   gl.uniform1f(webgl.uniforms.uMass, mass);
   gl.uniform1f(webgl.uniforms.uDiskInner, diskInner);
   gl.uniform1f(webgl.uniforms.uDiskOuter, diskOuter);
   gl.uniform1f(webgl.uniforms.uDiskBright, diskBright);
+  gl.uniform1f(webgl.uniforms.uCamTheta, camTheta);
+  gl.uniform1f(webgl.uniforms.uCamPhi, camPhi);
+  gl.uniform1f(webgl.uniforms.uCamDist, camDist);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 }
 
@@ -953,6 +994,7 @@ function loop(now) {
 
   resizeOverlay();
   resizeGL();
+  updateInfoPanel();
   renderGL();
   drawOverlay();
   requestAnimationFrame(loop);
