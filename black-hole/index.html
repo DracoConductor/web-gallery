@@ -109,6 +109,12 @@ body {
   <div class="val-row">r_out = <span class="kv" id="diskOuterLabel">18.0</span> r_s</div>
   <label>盘亮度</label>
   <input type="range" id="diskBright" min="0.1" max="2" value="0.8" step="0.05">
+  <label>星空密度</label>
+  <input type="range" id="starDensity" min="0.3" max="2.5" value="1" step="0.05">
+  <div class="val-row">密度 = <span class="kv" id="starDensityLabel">1.0</span></div>
+  <label>星空亮度</label>
+  <input type="range" id="starBright" min="0.1" max="2.5" value="0.8" step="0.05">
+  <div class="val-row">亮度 = <span class="kv" id="starBrightLabel">0.8</span></div>
   <div class="sep"></div>
   <label>粒子生成速率</label>
   <input type="range" id="spawnRate" min="0" max="8" value="2" step="0.1">
@@ -217,8 +223,103 @@ uniform float uDiskBright;
 uniform float uCamTheta;
 uniform float uCamPhi;
 uniform float uCamDist;
+uniform float uStarDensity;
+uniform float uStarBright;
+uniform float uTime;
 
 const float PI = 3.141592653589793;
+
+// ---- Hash & noise ----
+float hash31(vec3 p) {
+  float h = dot(p, vec3(127.1, 311.7, 74.7));
+  return fract(sin(h) * 43758.5453);
+}
+
+float hash13(vec3 p) {
+  float h = dot(p, vec3(127.1, 311.7, 74.7));
+  return fract(sin(h) * 43758.5453);
+}
+
+// ---- Starfield on unit sphere ----
+vec3 starColor(vec3 dir, float density, float brightness) {
+  vec3 col = vec3(0.0);
+
+  float cellSize = 0.04 / density;
+  vec3 cellCoord = floor(dir / cellSize);
+  vec3 localPos = fract(dir / cellSize);
+
+  for (int c = 0; c < 3; c++) {
+    vec3 cellOffset = vec3(
+      float(c) * 0.33 + 0.17,
+      float(c) * 0.57 + 0.29,
+      float(c) * 0.73 + 0.41
+    );
+    vec3 cellId = cellCoord + cellOffset;
+    float rnd = hash31(cellId);
+
+    int starCount = int(rnd * 3.5);
+    for (int s = 0; s < 3; s++) {
+      if (s >= starCount) break;
+      vec3 starOff = vec3(
+        hash31(cellId + vec3(float(s) * 0.1 + 0.05, 0.0, 0.0)),
+        hash31(cellId + vec3(0.0, float(s) * 0.1 + 0.05, 0.0)),
+        hash31(cellId + vec3(0.0, 0.0, float(s) * 0.1 + 0.05))
+      );
+      vec3 starPos = (cellCoord + starOff) * cellSize;
+      vec3 starDir = normalize(starPos);
+      float angle = acos(clamp(dot(dir, starDir), -1.0, 1.0));
+      float starSize = 0.004 + hash13(cellId + vec3(float(s))) * 0.012;
+      float falloff = exp(-angle * angle / (starSize * starSize));
+
+      float tempRand = hash13(cellId + vec3(float(s) * 0.3 + 0.17));
+      vec3 starRGB;
+      if (tempRand < 0.7) starRGB = vec3(1.0, 0.85, 0.65);
+      else if (tempRand < 0.9) starRGB = vec3(0.55, 0.7, 1.0);
+      else starRGB = vec3(1.0, 0.5, 0.3);
+
+      float starBright = (0.3 + rnd * 0.7) * falloff;
+      starBright *= brightness;
+      col += starRGB * starBright;
+    }
+  }
+
+  // Milky Way band
+  float galacticLat = abs(dir.y);
+  float band = exp(-galacticLat * 3.5) * 0.04 * brightness;
+  band += exp(-galacticLat * 1.2) * 0.015 * brightness;
+  float wisp = hash13(floor(dir * 30.0)) * 0.5 + 0.5;
+  band *= 0.6 + 0.4 * wisp;
+  col += vec3(0.15, 0.18, 0.35) * band;
+
+  return col;
+}
+
+// ---- Accretion disk color for a hit point ----
+vec3 diskHitColor(vec3 pos, vec3 vel, float M, float horizon, float diskR) {
+  float vK = sqrt(M / diskR);
+  vec3 velDir = normalize(vec3(-pos.z, 0.0, pos.x));
+  float vDotN = dot(velDir, vel);
+
+  float g = sqrt(1.0 - horizon / diskR);
+  float doppler = g / (1.0 - vDotN * vK);
+  doppler = clamp(doppler, 0.15, 6.0);
+
+  float tNorm = (diskR - uDiskInner * M) / max((uDiskOuter - uDiskInner) * M, 1.0);
+  float temp = 1.0 - clamp(tNorm, 0.0, 1.0);
+  temp = pow(temp, 1.5);
+
+  vec3 coldCol = vec3(0.85, 0.35, 0.12);
+  vec3 hotCol  = vec3(0.30, 0.60, 1.00);
+  vec3 diskCol = mix(coldCol, hotCol, temp * doppler * 0.7);
+
+  float brightness = uDiskBright * 0.7 * pow(uDiskInner * M / diskR, 3.0);
+  diskCol *= brightness * doppler;
+
+  float redshiftFactor = sqrt(1.0 - horizon / diskR);
+  diskCol *= redshiftFactor * 0.7 + 0.3;
+
+  return diskCol;
+}
 
 vec3 acesTonemap(vec3 c) {
   float a = 2.51, b = 0.03, c2 = 2.43, d = 0.59, e = 0.14;
@@ -227,7 +328,6 @@ vec3 acesTonemap(vec3 c) {
 
 void main() {
   float M = uMass;
-  // Spherical → Cartesian camera position
   vec3 camPos = vec3(
     uCamDist * sin(uCamPhi) * cos(uCamTheta),
     uCamDist * cos(uCamPhi),
@@ -244,26 +344,32 @@ void main() {
 
   vec3 pos = camPos;
   vec3 vel = -rayDir;
-  vec3 color = vec3(0.0, 0.0, 0.03);
+  vec3 color = vec3(0.0);
+  vec3 diskAccum = vec3(0.0);
+  int hitCount = 0;
+  float prevDiskR = -10.0;
+  bool captured = false;
+  vec3 escapeDir = rayDir;
 
   float horizon = 2.0 * M;
-  float camDist = uCamDist;
   float dt = 0.04;
-  float maxDist = camDist * 2.5;
+  float maxDist = uCamDist * 2.5;
 
   for (int i = 0; i < 600; i++) {
     float r = length(pos);
     if (r < horizon * 1.001) {
-      color = vec3(0.0, 0.0, 0.0);
+      captured = true;
       break;
     }
-    if (r > maxDist) break;
+    if (r > maxDist) {
+      escapeDir = normalize(vel);
+      break;
+    }
 
-    // Adaptive step near horizon
     float adaptDt = dt * (1.0 - exp(-(r - horizon) * 0.5 / M));
     adaptDt = max(adaptDt, 0.003);
 
-    // Check accretion disk hit (equatorial plane)
+    // --- Accretion disk hit test (multi-hit) ---
     float diskR = length(vec2(pos.x, pos.z));
     float diskY = abs(pos.y);
     float diskThickness = 0.08 + 0.04 * diskR / M;
@@ -272,50 +378,30 @@ void main() {
         diskR >= uDiskInner * M &&
         diskR <= uDiskOuter * M) {
 
-      // Speed at disk (Keplerian approximation)
-      float vK = sqrt(M / diskR);
-      vec3 velDir = normalize(vec3(-pos.z, 0.0, pos.x)); // tangential
-      float vDotN = dot(velDir, vel);
-
-      // Doppler factor
-      float g = sqrt(1.0 - horizon / diskR);
-      float doppler = g / (1.0 - vDotN * vK);
-      doppler = clamp(doppler, 0.2, 5.0);
-
-      // Temperature: hot inner, cool outer
-      float tNorm = (diskR - uDiskInner * M) / max((uDiskOuter - uDiskInner) * M, 1.0);
-      float temp = 1.0 - tNorm;
-      temp = pow(temp, 1.5);
-
-      vec3 coldCol = vec3(0.85, 0.35, 0.12);  // reddish
-      vec3 hotCol  = vec3(0.30, 0.60, 1.00);  // blue-white
-      vec3 diskCol = mix(coldCol, hotCol, temp * doppler * 0.7);
-
-      // Brightness ∝ r^(-3)
-      float brightness = uDiskBright * 0.7 * pow(uDiskInner * M / diskR, 3.0);
-      diskCol *= brightness * doppler;
-
-      // Gravitational redshift darkening
-      float redshiftFactor = sqrt(1.0 - horizon / diskR);
-      diskCol *= redshiftFactor * 0.7 + 0.3;
-
-      color = max(color, diskCol);
+      if (abs(diskR - prevDiskR) > diskThickness * 0.5) {
+        vec3 dCol = diskHitColor(pos, vel, M, horizon, diskR);
+        float weight = 1.0 / (1.0 + float(hitCount) * 2.5);
+        diskAccum += dCol * weight;
+        hitCount++;
+        prevDiskR = diskR;
+      }
+    } else {
+      if (diskY > diskThickness * diskR * 3.0 || diskR < uDiskInner * M * 0.8) {
+        prevDiskR = -10.0;
+      }
     }
 
-    // Photon sphere glow (r ≈ 3M)
+    // Photon sphere glow
     float phDist = abs(r - 3.0 * M);
     float photonGlow = exp(-phDist * phDist / (0.15 * M * M));
     color += vec3(0.04, 0.02, 0.12) * photonGlow * 0.6;
 
-    // Integrate geodesic
+    // --- RK2 geodesic integration ---
     float rho = r;
-    vec3 posN = pos / rho;
-    float posDot = dot(posN, vel);
     float r3 = rho * rho * rho;
     float factor = -M / r3;
     vec3 accel = factor * pos * (1.0 + horizon / rho);
 
-    // RK2 step
     vec3 halfPos = pos + vel * adaptDt * 0.5;
     float halfR = length(halfPos);
     float halfF = -M / (halfR * halfR * halfR) * (1.0 + horizon / halfR);
@@ -326,11 +412,17 @@ void main() {
     vel = normalize(vel);
   }
 
-  // Sky background
-  color = mix(vec3(0.0, 0.0, 0.06), color, 0.95);
+  if (captured) {
+    color = vec3(0.0, 0.0, 0.0);
+  } else {
+    vec3 starBG = starColor(escapeDir, uStarDensity, uStarBright);
+    color += starBG;
+    color += diskAccum;
+    color = mix(vec3(0.0, 0.0, 0.04), color, 0.95);
+  }
+
   color = acesTonemap(color);
 
-  // Vignette
   float vignette = 1.0 - length(vUV - 0.5) * 0.5;
   color *= vignette;
 
@@ -376,6 +468,9 @@ function initWebGL() {
       uCamTheta: gl.getUniformLocation(program, 'uCamTheta'),
       uCamPhi: gl.getUniformLocation(program, 'uCamPhi'),
       uCamDist: gl.getUniformLocation(program, 'uCamDist'),
+      uStarDensity: gl.getUniformLocation(program, 'uStarDensity'),
+      uStarBright: gl.getUniformLocation(program, 'uStarBright'),
+      uTime: gl.getUniformLocation(program, 'uTime'),
     }
   };
 }
@@ -404,6 +499,8 @@ let trailLength = 40;
 let simSpeed = 1.0;
 let autoSpawn = true;
 let simTime = 0;
+let starDensity = 1.0;
+let starBright = 0.8;
 let camTheta = 0.0;
 let camPhi = 1.05;
 let camDist = 8.0;
@@ -891,6 +988,16 @@ document.getElementById('simSpeed').addEventListener('input', function() {
   document.getElementById('speedLabel').textContent = simSpeed.toFixed(1);
 });
 
+document.getElementById('starDensity').addEventListener('input', function() {
+  starDensity = parseFloat(this.value);
+  document.getElementById('starDensityLabel').textContent = starDensity.toFixed(2);
+});
+
+document.getElementById('starBright').addEventListener('input', function() {
+  starBright = parseFloat(this.value);
+  document.getElementById('starBrightLabel').textContent = starBright.toFixed(2);
+});
+
 document.getElementById('btnAuto').addEventListener('click', function() {
   autoSpawn = !autoSpawn;
   this.classList.toggle('active', autoSpawn);
@@ -907,6 +1014,7 @@ document.getElementById('btnReset').addEventListener('click', () => {
   spawnRate = 2.0; trailLength = 40; simSpeed = 1.0; autoSpawn = true;
   viewScale = 22; viewOffset = { x: 0, y: 0 };
   camTheta = 0.0; camPhi = 1.05;
+  starDensity = 1.0; starBright = 0.8;
   particles.length = 0; spawnAccum = 0; selectedParticle = null;
 
   document.getElementById('massSlider').value = 1.0;
@@ -924,6 +1032,10 @@ document.getElementById('btnReset').addEventListener('click', () => {
   document.getElementById('speedLabel').textContent = '1.0';
   document.getElementById('btnAuto').classList.add('active');
   document.getElementById('btnAuto').textContent = '🔵 自动发射';
+  document.getElementById('starDensity').value = 1.0;
+  document.getElementById('starDensityLabel').textContent = '1.0';
+  document.getElementById('starBright').value = 0.8;
+  document.getElementById('starBrightLabel').textContent = '0.8';
 
   updateInfoPanel();
   updateParticleInfo();
@@ -962,6 +1074,9 @@ function renderGL() {
   gl.uniform1f(webgl.uniforms.uCamTheta, camTheta);
   gl.uniform1f(webgl.uniforms.uCamPhi, camPhi);
   gl.uniform1f(webgl.uniforms.uCamDist, camDist);
+  gl.uniform1f(webgl.uniforms.uStarDensity, starDensity);
+  gl.uniform1f(webgl.uniforms.uStarBright, starBright);
+  gl.uniform1f(webgl.uniforms.uTime, simTime);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 }
 
