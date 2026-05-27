@@ -245,7 +245,7 @@ vec3 starColor(vec3 dir, float density, float brightness) {
   vec3 col = vec3(0.0);
 
   // Each pixel independently samples potential star directions near its view angle.
-  // Star positions come from hashing a continuous perturbation of `dir` —
+  // Star positions come from hashing a continuous perturbation of dir —
   // no floor(), no cell boundaries, no grid artifacts.
   int numSamples = 8 + int(density * 10.0);
   for (int i = 0; i < 18; i++) {
