@@ -240,56 +240,57 @@ float hash13(vec3 p) {
   return fract(sin(h) * 43758.5453);
 }
 
-// ---- Starfield on unit sphere ----
+// ---- Starfield (per-pixel continuous, no grid) ----
 vec3 starColor(vec3 dir, float density, float brightness) {
   vec3 col = vec3(0.0);
 
-  float cellSize = 0.04 / density;
-  vec3 cellCoord = floor(dir / cellSize);
-  vec3 localPos = fract(dir / cellSize);
+  // Each pixel independently samples potential star directions near its view angle.
+  // Star positions come from hashing a continuous perturbation of `dir` —
+  // no floor(), no cell boundaries, no grid artifacts.
+  int numSamples = 8 + int(density * 10.0);
+  for (int i = 0; i < 18; i++) {
+    if (i >= numSamples) break;
 
-  for (int c = 0; c < 3; c++) {
-    vec3 cellOffset = vec3(
-      float(c) * 0.33 + 0.17,
-      float(c) * 0.57 + 0.29,
-      float(c) * 0.73 + 0.41
+    // Unique seed per iteration, varies smoothly with viewing direction
+    vec3 seed = dir + vec3(
+      0.173 * float(i) + 0.071,
+      0.317 * float(i) + 0.139,
+      0.521 * float(i) + 0.047
     );
-    vec3 cellId = cellCoord + cellOffset;
-    float rnd = hash31(cellId);
 
-    int starCount = int(rnd * 3.5);
-    for (int s = 0; s < 3; s++) {
-      if (s >= starCount) break;
-      vec3 starOff = vec3(
-        hash31(cellId + vec3(float(s) * 0.1 + 0.05, 0.0, 0.0)),
-        hash31(cellId + vec3(0.0, float(s) * 0.1 + 0.05, 0.0)),
-        hash31(cellId + vec3(0.0, 0.0, float(s) * 0.1 + 0.05))
-      );
-      vec3 starPos = (cellCoord + starOff) * cellSize;
-      vec3 starDir = normalize(starPos);
-      float angle = acos(clamp(dot(dir, starDir), -1.0, 1.0));
-      float starSize = 0.004 + hash13(cellId + vec3(float(s))) * 0.012;
-      float falloff = exp(-angle * angle / (starSize * starSize));
+    // Perturb direction by a small random offset in the tangent plane
+    float ax = hash31(seed) - 0.5;
+    float ay = hash31(seed + 0.1) - 0.5;
+    float az = hash31(seed + 0.2) - 0.5;
+    vec3 starDir = normalize(dir + vec3(ax, ay, az) * 0.35);
 
-      float tempRand = hash13(cellId + vec3(float(s) * 0.3 + 0.17));
+    float d = dot(dir, starDir);
+    // Angular gaussian: how close is the star to the pixel's view direction?
+    float starSigma = 0.003 + hash13(seed + 0.3) * 0.018;
+    float hit = exp(-(1.0 - d) / starSigma);
+
+    if (hit > 0.015) {
+      // Color: 70% warm / 20% blue-white / 10% orange
+      float tempRand = hash13(seed + 0.5);
       vec3 starRGB;
-      if (tempRand < 0.7) starRGB = vec3(1.0, 0.85, 0.65);
-      else if (tempRand < 0.9) starRGB = vec3(0.55, 0.7, 1.0);
-      else starRGB = vec3(1.0, 0.5, 0.3);
+      if (tempRand < 0.7) starRGB = vec3(1.00, 0.88, 0.70);
+      else if (tempRand < 0.9) starRGB = vec3(0.55, 0.72, 1.00);
+      else starRGB = vec3(1.00, 0.50, 0.32);
 
-      float starBright = (0.3 + rnd * 0.7) * falloff;
-      starBright *= brightness;
-      col += starRGB * starBright;
+      // Power-law brightness: many dim stars, few bright ones
+      float lum = hash13(seed + 0.7);
+      lum *= lum;
+      col += starRGB * (0.15 + lum * 0.85) * hit * brightness;
     }
   }
 
-  // Milky Way band
+  // Subtle Milky Way band
   float galacticLat = abs(dir.y);
-  float band = exp(-galacticLat * 3.5) * 0.04 * brightness;
-  band += exp(-galacticLat * 1.2) * 0.015 * brightness;
-  float wisp = hash13(floor(dir * 30.0)) * 0.5 + 0.5;
-  band *= 0.6 + 0.4 * wisp;
-  col += vec3(0.15, 0.18, 0.35) * band;
+  float band = exp(-galacticLat * 4.0) * 0.03 * brightness;
+  band += exp(-galacticLat * 1.5) * 0.01 * brightness;
+  float wisp = hash13(floor(dir * 23.0)) * 0.4 + 0.6;
+  band *= wisp;
+  col += vec3(0.12, 0.15, 0.30) * band;
 
   return col;
 }
